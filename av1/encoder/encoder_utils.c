@@ -1300,7 +1300,8 @@ void av1_set_mb_ssim_rdmult_scaling(AV1_COMP *cpi) {
           num_of_var += 1.0;
         }
       }
-      if (cpi->oxcf.tune_cfg.tuning == AOM_TUNE_IMAGE_PERCEPTUAL_QUALITY) {
+      if (cpi->oxcf.tune_cfg.tuning == AOM_TUNE_IMAGE_PERCEPTUAL_QUALITY ||
+      cpi->oxcf.tune_cfg.tuning == AOM_TUNE_IMAGE_PERCEPTUAL_QUALITY_VMAF_PSY_QP) {
         var = exp(var_log / num_of_var);
         const int cq_level = cpi->oxcf.rc_cfg.cq_level;
         const double hq_level = 30 * 4;
@@ -1320,8 +1321,10 @@ void av1_set_mb_ssim_rdmult_scaling(AV1_COMP *cpi) {
       log_sum += log(var);
     }
   }
-  if (cpi->oxcf.tune_cfg.tuning == AOM_TUNE_IMAGE_PERCEPTUAL_QUALITY &&
-      cpi->oxcf.q_cfg.deltaq_mode != NO_DELTA_Q) {
+  if ((cpi->oxcf.tune_cfg.tuning == AOM_TUNE_IMAGE_PERCEPTUAL_QUALITY &&
+      cpi->oxcf.q_cfg.deltaq_mode != NO_DELTA_Q) ||
+      (cpi->oxcf.tune_cfg.tuning == AOM_TUNE_IMAGE_PERCEPTUAL_QUALITY_VMAF_PSY_QP &&
+      cpi->oxcf.q_cfg.deltaq_mode != NO_DELTA_Q)) {
     const int sb_size = cpi->common.seq_params->sb_size;
     const int num_mi_w_sb = mi_size_wide[sb_size];
     const int num_mi_h_sb = mi_size_high[sb_size];
