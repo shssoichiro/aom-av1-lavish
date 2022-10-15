@@ -41,6 +41,27 @@ static INLINE void get_cdef_filter_strengths(CDEF_PICK_METHOD pick_method,
   if (pick_method == CDEF_FULL_SEARCH) return;
 
   switch (pick_method) {
+
+//Psy versions of reduced CDEF strength search space based on quantizer
+//Applies to full and L1 currently, used for quality and speed pruning
+
+    case CDEF_FULL_SEARCH_Q1: *pri_strength = priconv_q1[pri_idx]; break;
+    case CDEF_FULL_SEARCH_Q2: *pri_strength = priconv_q2[pri_idx]; break;
+    case CDEF_FULL_SEARCH_Q3:
+     *pri_strength = priconv_q3[pri_idx];
+     *sec_strength = secconv_q1[sec_idx];
+      break;
+
+    case CDEF_FULL_SEARCH_Q4:
+     *pri_strength = priconv_q4[pri_idx];
+     *sec_strength = secconv_q2[sec_idx];
+      break;
+
+    case CDEF_FULL_SEARCH_Q5:
+     *pri_strength = priconv_q5[pri_idx];
+     *sec_strength = secconv_q3[sec_idx];
+      break;
+
     case CDEF_FAST_SEARCH_LVL1: *pri_strength = priconv_lvl1[pri_idx]; break;
     case CDEF_FAST_SEARCH_LVL2: *pri_strength = priconv_lvl2[pri_idx]; break;
     case CDEF_FAST_SEARCH_LVL3:
@@ -267,22 +288,6 @@ static uint64_t compute_cdef_dist_highbd(void *dst, int dstride, uint16_t *src,
   return sum >> 2 * coeff_shift;
 }
 #endif
-
-// Checks dual and quad block processing is applicable for block widths 8 and 4
-// respectively.
-static INLINE int is_dual_or_quad_applicable(cdef_list *dlist, int width,
-                                             int cdef_count, int bi, int iter) {
-  assert(width == 8 || width == 4);
-  const int blk_offset = (width == 8) ? 1 : 3;
-  if ((iter + blk_offset) >= cdef_count) return 0;
-
-  if (dlist[bi].by == dlist[bi + blk_offset].by &&
-      dlist[bi].bx + blk_offset == dlist[bi + blk_offset].bx)
-    return 1;
-
-  return 0;
-}
-
 static uint64_t compute_cdef_dist(void *dst, int dstride, uint16_t *src,
                                   cdef_list *dlist, int cdef_count,
                                   BLOCK_SIZE bsize, int coeff_shift, int row,
@@ -291,93 +296,19 @@ static uint64_t compute_cdef_dist(void *dst, int dstride, uint16_t *src,
          bsize == BLOCK_8X8);
   uint64_t sum = 0;
   int bi, bx, by;
-  int iter = 0;
-  int inc = 1;
   uint8_t *dst8 = (uint8_t *)dst;
   uint8_t *dst_buff = &dst8[row * dstride + col];
   int src_stride, width, height, width_log2, height_log2;
   init_src_params(&src_stride, &width, &height, &width_log2, &height_log2,
                   bsize);
-
-  const int num_blks = 16 / width;
-  for (bi = 0; bi < cdef_count; bi += inc) {
+  for (bi = 0; bi < cdef_count; bi++) {
     by = dlist[bi].by;
     bx = dlist[bi].bx;
-    uint16_t *src_tmp = &src[bi << (height_log2 + width_log2)];
-    uint8_t *dst_tmp =
-        &dst_buff[(by << height_log2) * dstride + (bx << width_log2)];
-
-    if (is_dual_or_quad_applicable(dlist, width, cdef_count, bi, iter)) {
-      sum += aom_mse_16xh_16bit(dst_tmp, dstride, src_tmp, width, height);
-      iter += num_blks;
-      inc = num_blks;
-    } else {
-      sum += aom_mse_wxh_16bit(dst_tmp, dstride, src_tmp, src_stride, width,
-                               height);
-      iter += 1;
-      inc = 1;
-    }
+    sum += aom_mse_wxh_16bit(
+        &dst_buff[(by << height_log2) * dstride + (bx << width_log2)], dstride,
+        &src[bi << (height_log2 + width_log2)], src_stride, width, height);
   }
-
   return sum >> 2 * coeff_shift;
-}
-
-// Fill the boundary regions of the block with CDEF_VERY_LARGE, only if the
-// region is outside frame boundary
-static INLINE void fill_borders_for_fbs_on_frame_boundary(
-    uint16_t *inbuf, int hfilt_size, int vfilt_size,
-    bool is_fb_on_frm_left_boundary, bool is_fb_on_frm_right_boundary,
-    bool is_fb_on_frm_top_boundary, bool is_fb_on_frm_bottom_boundary) {
-  if (!is_fb_on_frm_left_boundary && !is_fb_on_frm_right_boundary &&
-      !is_fb_on_frm_top_boundary && !is_fb_on_frm_bottom_boundary)
-    return;
-  if (is_fb_on_frm_bottom_boundary) {
-    // Fill bottom region of the block
-    const int buf_offset =
-        (vfilt_size + CDEF_VBORDER) * CDEF_BSTRIDE + CDEF_HBORDER;
-    fill_rect(&inbuf[buf_offset], CDEF_BSTRIDE, CDEF_VBORDER, hfilt_size,
-              CDEF_VERY_LARGE);
-  }
-  if (is_fb_on_frm_bottom_boundary || is_fb_on_frm_left_boundary) {
-    const int buf_offset = (vfilt_size + CDEF_VBORDER) * CDEF_BSTRIDE;
-    // Fill bottom-left region of the block
-    fill_rect(&inbuf[buf_offset], CDEF_BSTRIDE, CDEF_VBORDER, CDEF_HBORDER,
-              CDEF_VERY_LARGE);
-  }
-  if (is_fb_on_frm_bottom_boundary || is_fb_on_frm_right_boundary) {
-    const int buf_offset =
-        (vfilt_size + CDEF_VBORDER) * CDEF_BSTRIDE + hfilt_size + CDEF_HBORDER;
-    // Fill bottom-right region of the block
-    fill_rect(&inbuf[buf_offset], CDEF_BSTRIDE, CDEF_VBORDER, CDEF_HBORDER,
-              CDEF_VERY_LARGE);
-  }
-  if (is_fb_on_frm_top_boundary) {
-    // Fill top region of the block
-    fill_rect(&inbuf[CDEF_HBORDER], CDEF_BSTRIDE, CDEF_VBORDER, hfilt_size,
-              CDEF_VERY_LARGE);
-  }
-  if (is_fb_on_frm_top_boundary || is_fb_on_frm_left_boundary) {
-    // Fill top-left region of the block
-    fill_rect(inbuf, CDEF_BSTRIDE, CDEF_VBORDER, CDEF_HBORDER, CDEF_VERY_LARGE);
-  }
-  if (is_fb_on_frm_top_boundary || is_fb_on_frm_right_boundary) {
-    const int buf_offset = hfilt_size + CDEF_HBORDER;
-    // Fill top-right region of the block
-    fill_rect(&inbuf[buf_offset], CDEF_BSTRIDE, CDEF_VBORDER, CDEF_HBORDER,
-              CDEF_VERY_LARGE);
-  }
-  if (is_fb_on_frm_left_boundary) {
-    const int buf_offset = CDEF_VBORDER * CDEF_BSTRIDE;
-    // Fill left region of the block
-    fill_rect(&inbuf[buf_offset], CDEF_BSTRIDE, vfilt_size, CDEF_HBORDER,
-              CDEF_VERY_LARGE);
-  }
-  if (is_fb_on_frm_right_boundary) {
-    const int buf_offset = CDEF_VBORDER * CDEF_BSTRIDE;
-    // Fill right region of the block
-    fill_rect(&inbuf[buf_offset + hfilt_size + CDEF_HBORDER], CDEF_BSTRIDE,
-              vfilt_size, CDEF_HBORDER, CDEF_VERY_LARGE);
-  }
 }
 
 // Calculates MSE at block level.
@@ -436,35 +367,26 @@ void av1_cdef_mse_calc_block(CdefSearchCtx *cdef_search_ctx, int fbr, int fbc,
   const int cdef_count = av1_cdef_compute_sb_list(
       mi_params, fbr * MI_SIZE_64X64, fbc * MI_SIZE_64X64, dlist, bs);
 
-  const bool is_fb_on_frm_left_boundary = (fbc == 0);
-  const bool is_fb_on_frm_right_boundary =
-      (fbc + hb_step == cdef_search_ctx->nhfb);
-  const bool is_fb_on_frm_top_boundary = (fbr == 0);
-  const bool is_fb_on_frm_bottom_boundary =
-      (fbr + vb_step == cdef_search_ctx->nvfb);
-  const int yoff = CDEF_VBORDER * (!is_fb_on_frm_top_boundary);
-  const int xoff = CDEF_HBORDER * (!is_fb_on_frm_left_boundary);
+  const int yoff = CDEF_VBORDER * (fbr != 0);
+  const int xoff = CDEF_HBORDER * (fbc != 0);
   int dirinit = 0;
   for (int pli = 0; pli < cdef_search_ctx->num_planes; pli++) {
+    for (int i = 0; i < CDEF_INBUF_SIZE; i++) inbuf[i] = CDEF_VERY_LARGE;
     /* We avoid filtering the pixels for which some of the pixels to
     average are outside the frame. We could change the filter instead,
     but it would add special cases for any future vectorization. */
-    const int hfilt_size = (nhb << mi_wide_l2[pli]);
-    const int vfilt_size = (nvb << mi_high_l2[pli]);
-    const int ysize =
-        vfilt_size + CDEF_VBORDER * (!is_fb_on_frm_bottom_boundary) + yoff;
-    const int xsize =
-        hfilt_size + CDEF_HBORDER * (!is_fb_on_frm_right_boundary) + xoff;
+    const int ysize = (nvb << mi_high_l2[pli]) +
+                      CDEF_VBORDER * (fbr + vb_step < cdef_search_ctx->nvfb) +
+                      yoff;
+    const int xsize = (nhb << mi_wide_l2[pli]) +
+                      CDEF_HBORDER * (fbc + hb_step < cdef_search_ctx->nhfb) +
+                      xoff;
     const int row = fbr * MI_SIZE_64X64 << mi_high_l2[pli];
     const int col = fbc * MI_SIZE_64X64 << mi_wide_l2[pli];
     struct macroblockd_plane pd = cdef_search_ctx->plane[pli];
     cdef_search_ctx->copy_fn(&in[(-yoff * CDEF_BSTRIDE - xoff)], CDEF_BSTRIDE,
                              pd.dst.buf, row - yoff, col - xoff, pd.dst.stride,
                              ysize, xsize);
-    fill_borders_for_fbs_on_frame_boundary(
-        inbuf, hfilt_size, vfilt_size, is_fb_on_frm_left_boundary,
-        is_fb_on_frm_right_boundary, is_fb_on_frm_top_boundary,
-        is_fb_on_frm_bottom_boundary);
     for (int gi = 0; gi < cdef_search_ctx->total_strengths; gi++) {
       int pri_strength, sec_strength;
       get_cdef_filter_strengths(cdef_search_ctx->pick_method, &pri_strength,

@@ -83,18 +83,18 @@ extern "C" {
 // adjust it while we work on documentation.
 /*!\cond */
 // Number of frames required to test for scene cut detection
-#define SCENE_CUT_KEY_TEST_INTERVAL 16
+#define SCENE_CUT_KEY_TEST_INTERVAL 24
 
 // Lookahead index threshold to enable temporal filtering for second arf.
 #define TF_LOOKAHEAD_IDX_THR 7
 
 #define HDR_QP_LEVELS 10
-#define CHROMA_CB_QP_SCALE 1.04
-#define CHROMA_CR_QP_SCALE 1.04
+#define CHROMA_CB_QP_SCALE 1.39
+#define CHROMA_CR_QP_SCALE 1.39
 #define CHROMA_QP_SCALE -0.46
 #define CHROMA_QP_OFFSET 9.26
 #define QP_SCALE_FACTOR 2.0
-#define DISABLE_HDR_LUMA_DELTAQ 1
+#define CHROMA_DQP_MAX 80
 
 // Rational number with an int64 numerator
 // This structure holds a fractional value
@@ -561,13 +561,13 @@ typedef struct {
   int drop_frames_water_mark;
   /*!
    * under_shoot_pct indicates the tolerance of the VBR algorithm to
-   * undershoot and is used as a trigger threshold for more aggressive
+   * undershoot and is used as a trigger threshold for more agressive
    * adaptation of Q. It's value can range from 0-100.
    */
   int under_shoot_pct;
   /*!
    * over_shoot_pct indicates the tolerance of the VBR algorithm to overshoot
-   * and is used as a trigger threshold for more aggressive adaptation of Q.
+   * and is used as a trigger threshold for more agressive adaptation of Q.
    * It's value can range from 0-1000.
    */
   int over_shoot_pct;
@@ -788,6 +788,10 @@ typedef struct {
   bool enable_hdr_deltaq;
   // Indicates if encoding with quantization matrices should be enabled.
   bool using_qm;
+  // ClybPatch -- Chroma Q Offset for U & V
+  int chroma_q_offset_u;
+
+  int chroma_q_offset_v;
 } QuantizationCfg;
 
 /*!\endcond */
@@ -802,6 +806,12 @@ typedef struct {
    * avoided and rdmult is adjusted in favour of block sharpness.
    */
   int sharpness;
+
+  /*!
+   * ClybPatch -- Controls the level at which quantization favours sharpness in the block. Has no impact on RD when set
+   * to zero (default). For values 1-7, quantization is adjusted in favour of block sharpness.
+   */
+  int quant_sharpness;
 
   /*!
    * Indicates the trellis optimization mode of quantized coefficients.
@@ -849,12 +859,6 @@ typedef struct {
    * 3: Loop filter is disables for the frames with low motion
    */
   LOOPFILTER_CONTROL loopfilter_control;
-
-  /*!
-   * Indicates if the application of post-processing filters should be skipped
-   * on reconstructed frame.
-   */
-  bool skip_postproc_filtering;
 } AlgoCfg;
 /*!\cond */
 
@@ -1064,6 +1068,30 @@ typedef struct AV1EncoderConfig {
 
   // Max depth for the GOP after a key frame
   int kf_max_pyr_height;
+  
+  // ClybPatch -- Add a modifiable parameter for modifying deltaq-mode=1's perceptual modulation via the interface
+  int dq_modulate;
+  // ClybPatch -- Add a modifiable parameter for modifying enable-tpl-model's effectiveness via the interface (Very WIP)
+  int delta_qindex_mult;
+  // ClybPatch -- Add modifiable parameters for modifying the TPL model's upwards or downwards quantization (Very WIP, advanced)
+  int delta_qindex_mult_pos;
+
+  int delta_qindex_mult_neg;
+
+  int vmaf_motion_mult;
+
+  int ssim_rd_mult;
+
+  int luma_bias;
+
+  int vmaf_preprocessing;
+
+  bool override_preprocessing;
+#if CONFIG_TUNE_BUTTERAUGLI
+  BLOCK_SIZE butteraugli_rdo_bsize;
+
+  int butteraugli_resize_factor;
+#endif
   /*!\endcond */
 } AV1EncoderConfig;
 
@@ -1364,6 +1392,12 @@ typedef struct {
    * encoding in the ith superblock row.
    */
   int *num_finished_cols;
+  /*!
+   * Buffer to store the mi position of the block whose encoding is complete.
+   * finished_block_in_mi[i] stores the mi position of the block which finished
+   * encoding in the ith superblock row.
+   */
+  int *finished_block_in_mi;
   /*!
    * Denotes the superblock interval at which conditional signalling should
    * happen. Also denotes the minimum number of extra superblocks of the top row
@@ -3411,11 +3445,6 @@ typedef struct AV1_COMP {
    * Struct for the reference structure for RTC.
    */
   RTC_REF rtc_ref;
-
-  /*!
-   * Block level thresholds to force zeromv-skip at partition level.
-   */
-  unsigned int zeromv_skip_thresh_exit_part[BLOCK_SIZES_ALL];
 } AV1_COMP;
 
 /*!
@@ -3763,10 +3792,8 @@ static INLINE void alloc_frame_mvs(AV1_COMMON *const cm, RefCntBuffer *buf) {
 // the frame token allocation.
 static INLINE unsigned int allocated_tokens(const TileInfo *tile,
                                             int sb_size_log2, int num_planes) {
-  int tile_mb_rows =
-      ROUND_POWER_OF_TWO(tile->mi_row_end - tile->mi_row_start, 2);
-  int tile_mb_cols =
-      ROUND_POWER_OF_TWO(tile->mi_col_end - tile->mi_col_start, 2);
+  int tile_mb_rows = (tile->mi_row_end - tile->mi_row_start + 2) >> 2;
+  int tile_mb_cols = (tile->mi_col_end - tile->mi_col_start + 2) >> 2;
 
   return get_token_alloc(tile_mb_rows, tile_mb_cols, sb_size_log2, num_planes);
 }
@@ -3904,12 +3931,12 @@ void av1_setup_frame_size(AV1_COMP *cpi);
 
 // Returns 1 if a frame is scaled and 0 otherwise.
 static INLINE int av1_resize_scaled(const AV1_COMMON *cm) {
-  return cm->superres_upscaled_width != cm->render_width ||
-         cm->superres_upscaled_height != cm->render_height;
+  return !(cm->superres_upscaled_width == cm->render_width &&
+           cm->superres_upscaled_height == cm->render_height);
 }
 
 static INLINE int av1_frame_scaled(const AV1_COMMON *cm) {
-  return av1_superres_scaled(cm) || av1_resize_scaled(cm);
+  return !av1_superres_scaled(cm) && av1_resize_scaled(cm);
 }
 
 // Don't allow a show_existing_frame to coincide with an error resilient
@@ -4074,12 +4101,6 @@ static INLINE int is_frame_resize_pending(const AV1_COMP *const cpi) {
            cpi->common.height != resize_pending_params->height));
 }
 
-// Check if CDEF is used.
-static INLINE int is_cdef_used(const AV1_COMMON *const cm) {
-  return cm->seq_params->enable_cdef && !cm->features.coded_lossless &&
-         !cm->tiles.large_scale;
-}
-
 // Check if loop restoration filter is used.
 static INLINE int is_restoration_used(const AV1_COMMON *const cm) {
   return cm->seq_params->enable_restoration && !cm->features.all_lossless &&
@@ -4090,12 +4111,6 @@ static INLINE int is_inter_tx_size_search_level_one(
     const TX_SPEED_FEATURES *tx_sf) {
   return (tx_sf->inter_tx_size_search_init_depth_rect >= 1 &&
           tx_sf->inter_tx_size_search_init_depth_sqr >= 1);
-}
-
-// Enable switchable motion mode only if warp and OBMC tools are allowed
-static INLINE bool is_switchable_motion_mode_allowed(bool allow_warped_motion,
-                                                     bool enable_obmc) {
-  return (allow_warped_motion || enable_obmc);
 }
 
 #if CONFIG_AV1_TEMPORAL_DENOISING

@@ -339,7 +339,7 @@ int av1_get_q_for_deltaq_objective(AV1_COMP *const cpi, ThreadData *td,
                                    int mi_row, int mi_col);
 
 int av1_get_q_for_hdr(AV1_COMP *const cpi, MACROBLOCK *const x,
-                      BLOCK_SIZE bsize, int mi_row, int mi_col);
+                      BLOCK_SIZE bsize);
 
 int av1_get_cb_rdmult(const AV1_COMP *const cpi, MACROBLOCK *const x,
                       const BLOCK_SIZE bsize, const int mi_row,
@@ -391,8 +391,8 @@ void av1_update_picked_ref_frames_mask(MACROBLOCK *const x, int ref_type,
 void av1_avg_cdf_symbols(FRAME_CONTEXT *ctx_left, FRAME_CONTEXT *ctx_tr,
                          int wt_left, int wt_tr);
 
-void av1_source_content_sb(AV1_COMP *cpi, MACROBLOCK *x, TileDataEnc *tile_data,
-                           int mi_row, int mi_col);
+void av1_source_content_sb(AV1_COMP *cpi, MACROBLOCK *x, int mi_row,
+                           int mi_col);
 
 void av1_reset_mbmi(CommonModeInfoParams *const mi_params, BLOCK_SIZE sb_size,
                     int mi_row, int mi_col);
@@ -565,6 +565,39 @@ static AOM_INLINE void enforce_max_ref_frames(
   assert(total_valid_refs <= max_allowed_refs);
 }
 
+// Check if the cost update of symbols mode, coeff and dv are tile or off.
+static AOM_INLINE int is_mode_coeff_dv_upd_freq_tile_or_off(
+    const AV1_COMP *const cpi) {
+  const INTER_MODE_SPEED_FEATURES *const inter_sf = &cpi->sf.inter_sf;
+
+  return (inter_sf->coeff_cost_upd_level <= INTERNAL_COST_UPD_TILE &&
+          inter_sf->mode_cost_upd_level <= INTERNAL_COST_UPD_TILE &&
+          cpi->sf.intra_sf.dv_cost_upd_level <= INTERNAL_COST_UPD_TILE);
+}
+
+// When row-mt is enabled and cost update frequencies are set to off/tile,
+// processing of current SB can start even before processing of top-right SB
+// is finished. This function checks if it is sufficient to wait for top SB
+// to finish processing before current SB starts processing.
+static AOM_INLINE int delay_wait_for_top_right_sb(const AV1_COMP *const cpi) {
+  const MODE mode = cpi->oxcf.mode;
+  if (mode == GOOD) return 0;
+
+  if (mode == ALLINTRA)
+    return is_mode_coeff_dv_upd_freq_tile_or_off(cpi);
+  else if (mode == REALTIME)
+    return (is_mode_coeff_dv_upd_freq_tile_or_off(cpi) &&
+            cpi->sf.inter_sf.mv_cost_upd_level <= INTERNAL_COST_UPD_TILE);
+  else
+    return 0;
+}
+
+// This function checks if top right dependency wait at mi level can be enabled.
+static AOM_INLINE int enable_top_right_sync_wait_in_mis(const AV1_COMP *cpi,
+                                                        int seg_skip_active) {
+  return cpi->sf.rt_sf.top_right_sync_wait_in_mis && !seg_skip_active &&
+         delay_wait_for_top_right_sb(cpi);
+}
 #ifdef __cplusplus
 }  // extern "C"
 #endif

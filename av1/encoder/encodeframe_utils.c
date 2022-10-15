@@ -33,21 +33,24 @@ void av1_set_ssim_rdmult(const AV1_COMP *const cpi, int *errorperbit,
   double num_of_mi = 0.0;
   double geom_mean_of_scale = 0.0;
 
-  assert(cpi->oxcf.tune_cfg.tuning == AOM_TUNE_SSIM);
+  assert(cpi->oxcf.tune_cfg.tuning == AOM_TUNE_SSIM ||
+         cpi->oxcf.tune_cfg.tuning == AOM_TUNE_IMAGE_PERCEPTUAL_QUALITY ||
+         cpi->oxcf.tune_cfg.tuning == AOM_TUNE_IMAGE_PERCEPTUAL_QUALITY_VMAF_PSY_QP ||
+         cpi->oxcf.tune_cfg.tuning == AOM_TUNE_LAVISH ||
+         cpi->oxcf.tune_cfg.tuning == AOM_TUNE_OMNI);
 
   for (row = mi_row / num_mi_w;
        row < num_rows && row < mi_row / num_mi_w + num_brows; ++row) {
     for (col = mi_col / num_mi_h;
          col < num_cols && col < mi_col / num_mi_h + num_bcols; ++col) {
       const int index = row * num_cols + col;
-      assert(cpi->ssim_rdmult_scaling_factors[index] != 0.0);
       geom_mean_of_scale += log(cpi->ssim_rdmult_scaling_factors[index]);
       num_of_mi += 1.0;
     }
   }
   geom_mean_of_scale = exp(geom_mean_of_scale / num_of_mi);
 
-  *rdmult = (int)((double)(*rdmult) * geom_mean_of_scale + 0.5);
+  *rdmult = (int)((double)(*rdmult) * (geom_mean_of_scale * cpi->oxcf.ssim_rd_mult / 100.0) + 0.5);
   *rdmult = AOMMAX(*rdmult, 0);
   av1_set_error_per_bit(errorperbit, *rdmult);
 }
@@ -58,7 +61,16 @@ static AOM_INLINE int set_deltaq_rdmult(const AV1_COMP *const cpi,
                                         const MACROBLOCK *const x) {
   const AV1_COMMON *const cm = &cpi->common;
   const CommonQuantParams *quant_params = &cm->quant_params;
-  return av1_compute_rd_mult(cpi, quant_params->base_qindex + x->delta_qindex +
+  int deltaq_multiplier = 100;
+  if ((cpi->oxcf.delta_qindex_mult_pos >= 0) && (x->delta_qindex > 0)) {
+    deltaq_multiplier = cpi->oxcf.delta_qindex_mult_pos;
+  } else if ((cpi->oxcf.delta_qindex_mult_neg >= 0) && (x->delta_qindex < 0)) {
+    deltaq_multiplier = cpi->oxcf.delta_qindex_mult_neg;
+  } else {
+    deltaq_multiplier = cpi->oxcf.delta_qindex_mult;
+  }
+
+  return av1_compute_rd_mult(cpi, quant_params->base_qindex + (int)round(x->delta_qindex * deltaq_multiplier / 100.0) +
                                       quant_params->y_dc_delta_q);
 }
 
@@ -1068,29 +1080,20 @@ int av1_get_q_for_deltaq_objective(AV1_COMP *const cpi, ThreadData *td,
   return qindex;
 }
 
-#if !DISABLE_HDR_LUMA_DELTAQ
 // offset table defined in Table3 of T-REC-H.Sup15 document.
 static const int hdr_thres[HDR_QP_LEVELS + 1] = { 0,   301, 367, 434, 501, 567,
                                                   634, 701, 767, 834, 1024 };
 
 static const int hdr10_qp_offset[HDR_QP_LEVELS] = { 3,  2,  1,  0,  -1,
                                                     -2, -3, -4, -5, -6 };
-#endif
 
 int av1_get_q_for_hdr(AV1_COMP *const cpi, MACROBLOCK *const x,
-                      BLOCK_SIZE bsize, int mi_row, int mi_col) {
+                      BLOCK_SIZE bsize) {
   AV1_COMMON *const cm = &cpi->common;
   assert(cm->seq_params->bit_depth == AOM_BITS_10);
 
-#if DISABLE_HDR_LUMA_DELTAQ
-  (void)x;
-  (void)bsize;
-  (void)mi_row;
-  (void)mi_col;
-  return cm->quant_params.base_qindex;
-#else
   // calculate pixel average
-  const int block_luma_avg = av1_log_block_avg(cpi, x, bsize, mi_row, mi_col);
+  const int block_luma_avg = av1_log_block_avg_hbd(x, bsize);
   // adjust offset based on average of the pixel block
   int offset = 0;
   for (int i = 0; i < HDR_QP_LEVELS; i++) {
@@ -1108,7 +1111,6 @@ int av1_get_q_for_hdr(AV1_COMP *const cpi, MACROBLOCK *const x,
   qindex = AOMMAX(qindex, MINQ);
 
   return qindex;
-#endif
 }
 #endif  // !CONFIG_REALTIME_ONLY
 
@@ -1312,78 +1314,10 @@ void av1_avg_cdf_symbols(FRAME_CONTEXT *ctx_left, FRAME_CONTEXT *ctx_tr,
               CFL_ALPHABET_SIZE);
 }
 
-// Check neighbor blocks' motion information.
-static int check_neighbor_blocks(MB_MODE_INFO **mi, int mi_stride,
-                                 const TileInfo *const tile_info, int mi_row,
-                                 int mi_col) {
-  int is_above_low_motion = 1;
-  int is_left_low_motion = 1;
-  const int thr = 24;
-
-  // Check above block.
-  if (mi_row > tile_info->mi_row_start) {
-    const MB_MODE_INFO *above_mbmi = mi[-mi_stride];
-    const int_mv above_mv = above_mbmi->mv[0];
-    if (above_mbmi->mode >= INTRA_MODE_END &&
-        (abs(above_mv.as_mv.row) > thr || abs(above_mv.as_mv.col) > thr))
-      is_above_low_motion = 0;
-  }
-
-  // Check left block.
-  if (mi_col > tile_info->mi_col_start) {
-    const MB_MODE_INFO *left_mbmi = mi[-1];
-    const int_mv left_mv = left_mbmi->mv[0];
-    if (left_mbmi->mode >= INTRA_MODE_END &&
-        (abs(left_mv.as_mv.row) > thr || abs(left_mv.as_mv.col) > thr))
-      is_left_low_motion = 0;
-  }
-
-  return (is_above_low_motion && is_left_low_motion);
-}
-
-// Check this block's motion in a fast way.
-static int fast_detect_non_zero_motion(AV1_COMP *cpi, const uint8_t *src_y,
-                                       int src_ystride,
-                                       const uint8_t *last_src_y,
-                                       int last_src_ystride, int mi_row,
-                                       int mi_col) {
-  AV1_COMMON *const cm = &cpi->common;
-  const BLOCK_SIZE bsize = cm->seq_params->sb_size;
-  unsigned int blk_sad = INT_MAX;
-  if (cpi->src_sad_blk_64x64 != NULL) {
-    const int sb_size_by_mb = (bsize == BLOCK_128X128)
-                                  ? (cm->seq_params->mib_size >> 1)
-                                  : cm->seq_params->mib_size;
-    const int sb_cols =
-        (cm->mi_params.mi_cols + sb_size_by_mb - 1) / sb_size_by_mb;
-    const int sbi_col = mi_col / sb_size_by_mb;
-    const int sbi_row = mi_row / sb_size_by_mb;
-    blk_sad = (unsigned int)cpi->src_sad_blk_64x64[sbi_col + sbi_row * sb_cols];
-  } else {
-    blk_sad = cpi->ppi->fn_ptr[bsize].sdf(src_y, src_ystride, last_src_y,
-                                          last_src_ystride);
-  }
-
-  // Search 4 1-away points.
-  const uint8_t *const search_pos[4] = {
-    last_src_y - last_src_ystride,
-    last_src_y - 1,
-    last_src_y + 1,
-    last_src_y + last_src_ystride,
-  };
-  unsigned int sad_arr[4];
-  cpi->ppi->fn_ptr[bsize].sdx4df(src_y, src_ystride, search_pos,
-                                 last_src_ystride, sad_arr);
-
-  blk_sad = (blk_sad * 5) >> 3;
-  return (blk_sad < sad_arr[0] && blk_sad < sad_arr[1] &&
-          blk_sad < sad_arr[2] && blk_sad < sad_arr[3]);
-}
-
 // Grade the temporal variation of the source by comparing the current sb and
 // its collocated block in the last frame.
-void av1_source_content_sb(AV1_COMP *cpi, MACROBLOCK *x, TileDataEnc *tile_data,
-                           int mi_row, int mi_col) {
+void av1_source_content_sb(AV1_COMP *cpi, MACROBLOCK *x, int mi_row,
+                           int mi_col) {
   unsigned int tmp_sse;
   unsigned int tmp_variance;
   const BLOCK_SIZE bsize = cpi->common.seq_params->sb_size;
@@ -1433,9 +1367,7 @@ void av1_source_content_sb(AV1_COMP *cpi, MACROBLOCK *x, TileDataEnc *tile_data,
   if (cpi->last_source->y_width != cpi->source->y_width ||
       cpi->last_source->y_height != cpi->source->y_height)
     return;
-  if (!cpi->sf.rt_sf.use_rtc_tf || tmp_sse == 0 || cpi->rc.high_source_sad ||
-      cpi->rc.frame_source_sad > 20000)
-    return;
+  if (!cpi->sf.rt_sf.use_rtc_tf || tmp_sse == 0) return;
 
   // In-place temporal filter. If psnr calculation is enabled, we store the
   // source for that.
@@ -1444,35 +1376,10 @@ void av1_source_content_sb(AV1_COMP *cpi, MACROBLOCK *x, TileDataEnc *tile_data,
   const unsigned int nmean2 = tmp_sse - tmp_variance;
   const int ac_q_step = av1_ac_quant_QTX(cm->quant_params.base_qindex, 0,
                                          cm->seq_params->bit_depth);
-  const PRIMARY_RATE_CONTROL *const p_rc = &cpi->ppi->p_rc;
-  const int avg_q_step = av1_ac_quant_QTX(p_rc->avg_frame_qindex[INTER_FRAME],
-                                          0, cm->seq_params->bit_depth);
-
-  const unsigned int threshold =
-      (cpi->sf.rt_sf.use_rtc_tf == 1)
-          ? (clamp(avg_q_step, 250, 1000)) * ac_q_step
-          : 250 * ac_q_step;
+  const unsigned int threshold = 3 * ac_q_step * ac_q_step / 2;
 
   // TODO(yunqing): use a weighted sum instead of averaging in filtering.
   if (tmp_variance <= threshold && nmean2 <= 15) {
-    // Check neighbor blocks. If neighbor blocks aren't low-motion blocks,
-    // skip temporal filtering for this block.
-    MB_MODE_INFO **mi = cm->mi_params.mi_grid_base +
-                        get_mi_grid_idx(&cm->mi_params, mi_row, mi_col);
-    const TileInfo *const tile_info = &tile_data->tile_info;
-    const int is_neighbor_blocks_low_motion = check_neighbor_blocks(
-        mi, cm->mi_params.mi_stride, tile_info, mi_row, mi_col);
-    if (!is_neighbor_blocks_low_motion) return;
-
-    // Only consider 64x64 SB for now. Need to extend to 128x128 for large SB
-    // size.
-    // Test several nearby points. If non-zero mv exists, don't do temporal
-    // filtering.
-    const int is_this_blk_low_motion = fast_detect_non_zero_motion(
-        cpi, src_y, src_ystride, last_src_y, last_src_ystride, mi_row, mi_col);
-
-    if (!is_this_blk_low_motion) return;
-
     const int shift_x[2] = { 0, cpi->source->subsampling_x };
     const int shift_y[2] = { 0, cpi->source->subsampling_y };
     const uint8_t h = block_size_high[bsize];

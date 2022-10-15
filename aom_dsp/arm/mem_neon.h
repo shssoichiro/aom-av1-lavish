@@ -15,64 +15,6 @@
 #include <string.h>
 #include "aom_dsp/aom_dsp_common.h"
 
-// Support for xN Neon intrinsics is lacking in some compilers.
-#if defined(__arm__) || defined(_M_ARM)
-#define ARM_32_BIT
-#endif
-
-// DEFICIENT_CLANG_32_BIT includes clang-cl.
-#if defined(__clang__) && defined(ARM_32_BIT) && \
-    (__clang_major__ <= 6 || (defined(__ANDROID__) && __clang_major__ <= 7))
-#define DEFICIENT_CLANG_32_BIT  // This includes clang-cl.
-#endif
-
-#if defined(__GNUC__) && !defined(__clang__) && defined(ARM_32_BIT)
-#define GCC_32_BIT
-#endif
-
-#if defined(DEFICIENT_CLANG_32_BIT) || defined(GCC_32_BIT)
-
-static INLINE uint8x16x3_t vld1q_u8_x3(const uint8_t *ptr) {
-  uint8x16x3_t res = { { vld1q_u8(ptr + 0 * 16), vld1q_u8(ptr + 1 * 16),
-                         vld1q_u8(ptr + 2 * 16) } };
-  return res;
-}
-
-static INLINE uint8x16x2_t vld1q_u8_x2(const uint8_t *ptr) {
-  uint8x16x2_t res = { { vld1q_u8(ptr + 0 * 16), vld1q_u8(ptr + 1 * 16) } };
-  return res;
-}
-
-static INLINE uint16x8x4_t vld1q_u16_x4(const uint16_t *ptr) {
-  uint16x8x4_t res = { { vld1q_u16(ptr + 0 * 8), vld1q_u16(ptr + 1 * 8),
-                         vld1q_u16(ptr + 2 * 8), vld1q_u16(ptr + 3 * 8) } };
-  return res;
-}
-
-#elif defined(__GNUC__) && !defined(__clang__)  // GCC 64-bit.
-#if __GNUC__ < 8
-
-static INLINE uint8x16x2_t vld1q_u8_x2(const uint8_t *ptr) {
-  uint8x16x2_t res = { { vld1q_u8(ptr + 0 * 16), vld1q_u8(ptr + 1 * 16) } };
-  return res;
-}
-
-static INLINE uint16x8x4_t vld1q_u16_x4(const uint16_t *ptr) {
-  uint16x8x4_t res = { { vld1q_u16(ptr + 0 * 8), vld1q_u16(ptr + 1 * 8),
-                         vld1q_u16(ptr + 2 * 8), vld1q_u16(ptr + 3 * 8) } };
-  return res;
-}
-#endif  // __GNUC__ < 8
-
-#if __GNUC__ < 9
-static INLINE uint8x16x3_t vld1q_u8_x3(const uint8_t *ptr) {
-  uint8x16x3_t res = { { vld1q_u8(ptr + 0 * 16), vld1q_u8(ptr + 1 * 16),
-                         vld1q_u8(ptr + 2 * 16) } };
-  return res;
-}
-#endif  // __GNUC__ < 9
-#endif  // defined(__GNUC__) && !defined(__clang__)
-
 static INLINE void store_row2_u8_8x8(uint8_t *s, int p, const uint8x8_t s0,
                                      const uint8x8_t s1) {
   vst1_u8(s, s0);

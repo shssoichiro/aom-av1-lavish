@@ -110,6 +110,7 @@ typedef struct av1_codec_arg_definitions {
   arg_def_t save_as_annexb;
   arg_def_t noise_sens;
   arg_def_t sharpness;
+  arg_def_t quant_sharpness;
   arg_def_t static_thresh;
   arg_def_t auto_altref;
   arg_def_t arnr_maxframes;
@@ -232,6 +233,20 @@ typedef struct av1_codec_arg_definitions {
   arg_def_t auto_intra_tools_off;
   arg_def_t strict_level_conformance;
   arg_def_t kf_max_pyr_height;
+  arg_def_t dq_modulate;
+  arg_def_t delta_qindex_mult;
+  arg_def_t delta_qindex_mult_pos;
+  arg_def_t delta_qindex_mult_neg;
+  arg_def_t vmaf_motion_mult;
+  arg_def_t ssim_rd_mult;
+  arg_def_t luma_bias;
+  arg_def_t chroma_q_offset_u;
+  arg_def_t chroma_q_offset_v;
+  arg_def_t vmaf_preprocessing;
+#if CONFIG_TUNE_BUTTERAUGLI
+  arg_def_t butteraugli_rdo_bsize;
+  arg_def_t butteraugli_resize_factor;
+#endif
 #endif  // CONFIG_AV1_ENCODER
 } av1_codec_arg_definitions_t;
 

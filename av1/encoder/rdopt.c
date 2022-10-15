@@ -2533,7 +2533,7 @@ static AOM_INLINE int prune_zero_mv_with_sse(
  * is currently only used by realtime mode as \ref
  * av1_interpolation_filter_search is not called during realtime encoding.
  *
- * This function only searches over two possible filters. EIGHTTAP_REGULAR is
+ * This funciton only searches over two possible filters. EIGHTTAP_REGULAR is
  * always search. For lowres clips (<= 240p), MULTITAP_SHARP is also search. For
  * higher  res slips (>240p), EIGHTTAP_SMOOTH is also searched.
  *  *
@@ -3805,8 +3805,11 @@ static AOM_INLINE void init_mode_skip_mask(mode_skip_mask_t *mask,
     // unless ARNR filtering is enabled in which case we want
     // an unfiltered alternative. We allow near/nearest as well
     // because they may result in zero-zero MVs but be cheaper.
+    // This never happens in normal aomenc since arnr-maxframes=1
+    // is supposed to disable temporal filtering entirely, but nooo
+    // Last of my work on tpl filtering BS
     if (cpi->rc.is_src_frame_alt_ref &&
-        (cpi->oxcf.algo_cfg.arnr_max_frames == 0)) {
+        (cpi->oxcf.algo_cfg.arnr_max_frames <= 1)) {
       disable_inter_references_except_altref(mask->ref_combo);
 
       mask->pred_modes[ALTREF_FRAME] = ~INTER_NEAREST_NEAR_ZERO;
@@ -5656,6 +5659,42 @@ static AOM_INLINE int get_block_temp_var(const AV1_COMP *cpi,
   return is_low_temp_var;
 }
 
+static void log_sub_block_var(const AV1_COMP *cpi, MACROBLOCK *x, BLOCK_SIZE bs,
+                              double *var_min, double *var_max) {
+  // This functions returns a the minimum and maximum log variances for 4x4
+  // sub blocks in the current block.
+
+  const MACROBLOCKD *const xd = &x->e_mbd;
+  const int is_hbd = is_cur_buf_hbd(xd);
+  const int right_overflow =
+      (xd->mb_to_right_edge < 0) ? ((-xd->mb_to_right_edge) >> 3) : 0;
+  const int bottom_overflow =
+      (xd->mb_to_bottom_edge < 0) ? ((-xd->mb_to_bottom_edge) >> 3) : 0;
+  const int bw = MI_SIZE * mi_size_wide[bs] - right_overflow;
+  const int bh = MI_SIZE * mi_size_high[bs] - bottom_overflow;
+
+  // Initialize minimum variance to a large value and maximum variance to 0.
+  double min_var_4x4 = (double)INT_MAX;
+  double max_var_4x4 = 0.0;
+
+  for (int i = 0; i < bh; i += MI_SIZE) {
+    for (int j = 0; j < bw; j += MI_SIZE) {
+      int var;
+      // Calculate the 4x4 sub-block variance.
+      var = av1_calc_normalized_variance(
+          cpi->ppi->fn_ptr[BLOCK_4X4].vf,
+          x->plane[0].src.buf + (i * x->plane[0].src.stride) + j,
+          x->plane[0].src.stride, is_hbd);
+
+      // Record min and max for over-arching block
+      min_var_4x4 = AOMMIN(min_var_4x4, var);
+      max_var_4x4 = AOMMAX(max_var_4x4, var);
+    }
+  }
+  *var_min = log(1.0 + min_var_4x4 / 16.0);
+  *var_max = log(1.0 + max_var_4x4 / 16.0);
+}
+
 // TODO(chiyotsai@google.com): See the todo for av1_rd_pick_intra_mode_sb.
 void av1_rd_pick_inter_mode(struct AV1_COMP *cpi, struct TileDataEnc *tile_data,
                             struct macroblock *x, struct RD_STATS *rd_cost,
@@ -5962,6 +6001,30 @@ void av1_rd_pick_inter_mode(struct AV1_COMP *cpi, struct TileDataEnc *tile_data,
       ref_frame_rd[ref_frame] = this_rd;
     }
 
+      // In film mode bias against DC pred and other intra if there is a
+      // significant difference between the variance of the sub blocks in the
+      // the source. Also apply some bias against compound modes which also
+      // tend to blur fine texture such as film grain over time.
+      //
+      // The sub block test here acts in the case where one or more sub
+      // blocks have high relatively variance but others relatively low
+      // variance. Here the high variance sub blocks may push the
+      // total variance for the current block size over the thresholds
+      // used in rd_variance_adjustment() below.
+    if (cpi->oxcf.tune_cfg.content == AOM_CONTENT_FILM) { // Preliminary tune-content=film implementation from VP9
+      if (bsize >= BLOCK_16X16) {
+        double var_min, var_max;
+        log_sub_block_var(cpi, x, bsize, &var_min, &var_max);
+        if (ref_frame == INTRA_FRAME) {
+          if (this_mode == DC_PRED)
+            this_rd += (int64_t)(this_rd * (var_max - var_min));
+          else
+            this_rd += (int64_t)(this_rd * (var_max - var_min)) / 4;
+        } else if (second_ref_frame > INTRA_FRAME) {
+          this_rd += this_rd / 4;
+        }
+      }
+    }
     // Did this mode help, i.e., is it the new best mode
     if (this_rd < search_state.best_rd) {
       assert(IMPLIES(comp_pred,

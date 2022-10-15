@@ -292,7 +292,7 @@ static AOM_INLINE double cal_approx_vmaf(const AV1_COMP *const cpi,
                                          YV12_BUFFER_CONFIG *const sharpened) {
   const int bit_depth = cpi->td.mb.e_mbd.bd;
   const bool cal_vmaf_neg =
-      cpi->oxcf.tune_cfg.tuning == AOM_TUNE_VMAF_NEG_MAX_GAIN;
+      ((cpi->oxcf.tune_cfg.tuning == AOM_TUNE_VMAF_NEG_MAX_GAIN) && cpi->oxcf.override_preprocessing == 0) || cpi->oxcf.vmaf_preprocessing == 1;
   double new_vmaf;
 
   aom_calc_vmaf(cpi->vmaf_info.vmaf_model, source, sharpened, bit_depth,
@@ -651,7 +651,7 @@ void av1_set_mb_vmaf_rdmult_scaling(AV1_COMP *cpi) {
 
   VmafContext *vmaf_context;
   const bool cal_vmaf_neg =
-      cpi->oxcf.tune_cfg.tuning == AOM_TUNE_VMAF_NEG_MAX_GAIN;
+      ((cpi->oxcf.tune_cfg.tuning == AOM_TUNE_VMAF_NEG_MAX_GAIN) && cpi->oxcf.override_preprocessing == 0) || cpi->oxcf.vmaf_preprocessing == 1;
   aom_init_vmaf_context(&vmaf_context, cpi->vmaf_info.vmaf_model, cal_vmaf_neg);
   unsigned int *sses = aom_calloc(num_rows * num_cols, sizeof(*sses));
   if (!sses) {
@@ -935,7 +935,7 @@ int av1_get_vmaf_base_qindex(const AV1_COMP *const cpi, int current_qindex) {
   const double dvmaf = 26.11 * (1.0 - exp(-0.06 * motion));
   const double dsse = dvmaf * approx_sse / approx_dvmaf;
 
-  const double beta = approx_sse / (dsse + approx_sse);
+  const double beta = (approx_sse / (dsse + approx_sse) * cpi->oxcf.vmaf_motion_mult / 100.0);
   const int offset =
       av1_get_deltaq_offset(cm->seq_params->bit_depth, current_qindex, beta);
   int qindex = current_qindex + offset;
@@ -953,7 +953,7 @@ static AOM_INLINE double cal_approx_score(
   double score;
   const uint32_t bit_depth = cpi->td.mb.e_mbd.bd;
   const bool cal_vmaf_neg =
-      cpi->oxcf.tune_cfg.tuning == AOM_TUNE_VMAF_NEG_MAX_GAIN;
+      ((cpi->oxcf.tune_cfg.tuning == AOM_TUNE_VMAF_NEG_MAX_GAIN) && cpi->oxcf.override_preprocessing == 0) || cpi->oxcf.vmaf_preprocessing == 1;
   aom_calc_vmaf(cpi->vmaf_info.vmaf_model, src, recon_sharpened, bit_depth,
                 cal_vmaf_neg, &score);
   return src_variance / new_variance * (score - src_score);
@@ -1078,7 +1078,7 @@ void av1_update_vmaf_curve(AV1_COMP *cpi) {
       AOMMIN(gf_group->layer_depth[cpi->gf_frame_index], MAX_ARF_LAYERS - 1);
   double base_score;
   const bool cal_vmaf_neg =
-      cpi->oxcf.tune_cfg.tuning == AOM_TUNE_VMAF_NEG_MAX_GAIN;
+      ((cpi->oxcf.tune_cfg.tuning == AOM_TUNE_VMAF_NEG_MAX_GAIN) && cpi->oxcf.override_preprocessing == 0) || cpi->oxcf.vmaf_preprocessing == 1;
   aom_calc_vmaf(cpi->vmaf_info.vmaf_model, source, recon, bit_depth,
                 cal_vmaf_neg, &base_score);
   cpi->vmaf_info.last_frame_vmaf[layer_depth] = base_score;
@@ -1092,7 +1092,7 @@ void av1_update_vmaf_curve(AV1_COMP *cpi) {
         (double)aom_get_y_sse(source, recon);
   }
 
-  if (cpi->oxcf.tune_cfg.tuning == AOM_TUNE_VMAF_NEG_MAX_GAIN) {
+  if (((cpi->oxcf.tune_cfg.tuning == AOM_TUNE_VMAF_NEG_MAX_GAIN) && cpi->oxcf.override_preprocessing == 0) || cpi->oxcf.vmaf_preprocessing == 1) {
     YV12_BUFFER_CONFIG *last, *next;
     get_neighbor_frames(cpi, &last, &next);
     double best_unsharp_amount_start =

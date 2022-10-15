@@ -187,6 +187,9 @@ static void row_mt_sync_mem_alloc(AV1EncRowMultiThreadSync *row_mt_sync,
 
   CHECK_MEM_ERROR(cm, row_mt_sync->num_finished_cols,
                   aom_malloc(sizeof(*row_mt_sync->num_finished_cols) * rows));
+  CHECK_MEM_ERROR(
+      cm, row_mt_sync->finished_block_in_mi,
+      aom_malloc(sizeof(*row_mt_sync->finished_block_in_mi) * rows));
 
   row_mt_sync->rows = rows;
   // Set up nsync.
@@ -213,6 +216,7 @@ static void row_mt_sync_mem_dealloc(AV1EncRowMultiThreadSync *row_mt_sync) {
     }
 #endif  // CONFIG_MULTITHREAD
     aom_free(row_mt_sync->num_finished_cols);
+    aom_free(row_mt_sync->finished_block_in_mi);
 
     // clear the structure as the source of this call may be dynamic change
     // in tiles in which case this call will be followed by an _alloc()
@@ -444,12 +448,6 @@ static int enc_row_mt_worker_hook(void *arg1, void *unused) {
   pthread_mutex_t *enc_row_mt_mutex_ = enc_row_mt->mutex_;
 #endif
   (void)unused;
-  // Preallocate the pc_tree for realtime coding to reduce the cost of memory
-  // allocation.
-  thread_data->td->rt_pc_root =
-      cpi->sf.rt_sf.use_nonrd_pick_mode
-          ? av1_alloc_pc_tree_node(cm->seq_params->sb_size)
-          : NULL;
 
   assert(cur_tile_id != -1);
 
@@ -521,8 +519,6 @@ static int enc_row_mt_worker_hook(void *arg1, void *unused) {
 #endif
   }
 
-  av1_free_pc_tree_recursive(thread_data->td->rt_pc_root, av1_num_planes(cm), 0,
-                             0);
   return 1;
 }
 
@@ -535,12 +531,6 @@ static int enc_worker_hook(void *arg1, void *unused) {
   int t;
 
   (void)unused;
-  // Preallocate the pc_tree for realtime coding to reduce the cost of memory
-  // allocation.
-  thread_data->td->rt_pc_root =
-      cpi->sf.rt_sf.use_nonrd_pick_mode
-          ? av1_alloc_pc_tree_node(cm->seq_params->sb_size)
-          : NULL;
 
   for (t = thread_data->start; t < tile_rows * tile_cols;
        t += cpi->mt_info.num_workers) {
@@ -553,9 +543,6 @@ static int enc_worker_hook(void *arg1, void *unused) {
     thread_data->td->mb.tile_pb_ctx = &this_tile->tctx;
     av1_encode_tile(cpi, thread_data->td, tile_row, tile_col);
   }
-
-  av1_free_pc_tree_recursive(thread_data->td->rt_pc_root, av1_num_planes(cm), 0,
-                             0);
 
   return 1;
 }
@@ -1238,6 +1225,9 @@ static AOM_INLINE void accumulate_counters_enc_workers(AV1_COMP *cpi,
           thread_data->td->mb.txfm_search_info.tx_search_count;
 #endif  // CONFIG_SPEED_STATS
     }
+
+    av1_free_pc_tree_recursive(thread_data->td->rt_pc_root,
+                               av1_num_planes(&cpi->common), 0, 0);
   }
 }
 
@@ -1336,6 +1326,13 @@ static AOM_INLINE void prepare_enc_workers(AV1_COMP *cpi, AVxWorkerHook hook,
             thread_data->td->mb.tmp_pred_bufs[j];
       }
     }
+
+    // Preallocate the pc_tree for realtime coding to reduce the cost of memory
+    // allocation.
+    thread_data->td->rt_pc_root =
+        cpi->sf.rt_sf.use_nonrd_pick_mode
+            ? av1_alloc_pc_tree_node(cm->seq_params->sb_size)
+            : NULL;
   }
 }
 
@@ -1566,6 +1563,8 @@ void av1_encode_tiles_row_mt(AV1_COMP *cpi) {
       // Initialize num_finished_cols to -1 for all rows.
       memset(row_mt_sync->num_finished_cols, -1,
              sizeof(*row_mt_sync->num_finished_cols) * max_sb_rows);
+      memset(row_mt_sync->finished_block_in_mi, -1,
+             sizeof(*row_mt_sync->finished_block_in_mi) * max_sb_rows);
       row_mt_sync->next_mi_row = this_tile->tile_info.mi_row_start;
       row_mt_sync->num_threads_working = 0;
       row_mt_sync->intrabc_extra_top_right_sb_delay =

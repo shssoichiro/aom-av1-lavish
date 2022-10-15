@@ -57,15 +57,6 @@ void ReferenceHadamard4x4(const int16_t *a, int a_stride, OutputType *b) {
   }
   for (int i = 0; i < 4; ++i) Hadamard4x4(input + i, buf + i * 4);
   for (int i = 0; i < 4; ++i) Hadamard4x4(buf + i, b + i * 4);
-
-  // Extra transpose to match C and SSE2 behavior(i.e., aom_hadamard_4x4).
-  for (int i = 0; i < 4; i++) {
-    for (int j = i + 1; j < 4; j++) {
-      OutputType temp = b[j * 4 + i];
-      b[j * 4 + i] = b[i * 4 + j];
-      b[i * 4 + j] = temp;
-    }
-  }
 }
 
 template <typename OutputType>
@@ -103,16 +94,6 @@ void ReferenceHadamard8x8(const int16_t *a, int a_stride, OutputType *b) {
   }
   for (int i = 0; i < 8; ++i) HadamardLoop(input + i, buf + i * 8);
   for (int i = 0; i < 8; ++i) HadamardLoop(buf + i, b + i * 8);
-
-  // Extra transpose to match SSE2 behavior (i.e., aom_hadamard_8x8 and
-  // aom_hadamard_lp_8x8).
-  for (int i = 0; i < 8; i++) {
-    for (int j = i + 1; j < 8; j++) {
-      OutputType temp = b[j * 8 + i];
-      b[j * 8 + i] = b[i * 8 + j];
-      b[i * 8 + j] = temp;
-    }
-  }
 }
 
 template <typename OutputType>
@@ -124,8 +105,7 @@ void ReferenceHadamard8x8Dual(const int16_t *a, int a_stride, OutputType *b) {
 }
 
 template <typename OutputType>
-void ReferenceHadamard16x16(const int16_t *a, int a_stride, OutputType *b,
-                            bool shift) {
+void ReferenceHadamard16x16(const int16_t *a, int a_stride, OutputType *b) {
   /* The source is a 16x16 block. The destination is rearranged to 8x32.
    * Input is 9 bit. */
   ReferenceHadamard8x8(a + 0 + 0 * a_stride, a_stride, b + 0);
@@ -155,27 +135,14 @@ void ReferenceHadamard16x16(const int16_t *a, int a_stride, OutputType *b,
 
     ++b;
   }
-
-  if (shift) {
-    b -= 64;
-    // Extra shift to match aom_hadamard_16x16_c and aom_hadamard_16x16_avx2.
-    for (int i = 0; i < 16; i++) {
-      for (int j = 0; j < 4; j++) {
-        OutputType temp = b[i * 16 + 4 + j];
-        b[i * 16 + 4 + j] = b[i * 16 + 8 + j];
-        b[i * 16 + 8 + j] = temp;
-      }
-    }
-  }
 }
 
 template <typename OutputType>
-void ReferenceHadamard32x32(const int16_t *a, int a_stride, OutputType *b,
-                            bool shift) {
-  ReferenceHadamard16x16(a + 0 + 0 * a_stride, a_stride, b + 0, shift);
-  ReferenceHadamard16x16(a + 16 + 0 * a_stride, a_stride, b + 256, shift);
-  ReferenceHadamard16x16(a + 0 + 16 * a_stride, a_stride, b + 512, shift);
-  ReferenceHadamard16x16(a + 16 + 16 * a_stride, a_stride, b + 768, shift);
+void ReferenceHadamard32x32(const int16_t *a, int a_stride, OutputType *b) {
+  ReferenceHadamard16x16(a + 0 + 0 * a_stride, a_stride, b + 0);
+  ReferenceHadamard16x16(a + 16 + 0 * a_stride, a_stride, b + 256);
+  ReferenceHadamard16x16(a + 0 + 16 * a_stride, a_stride, b + 512);
+  ReferenceHadamard16x16(a + 16 + 16 * a_stride, a_stride, b + 768);
 
   for (int i = 0; i < 256; ++i) {
     const OutputType a0 = b[0];
@@ -199,11 +166,11 @@ void ReferenceHadamard32x32(const int16_t *a, int a_stride, OutputType *b,
 
 template <typename OutputType>
 void ReferenceHadamard(const int16_t *a, int a_stride, OutputType *b, int bw,
-                       int bh, bool shift) {
+                       int bh) {
   if (bw == 32 && bh == 32) {
-    ReferenceHadamard32x32(a, a_stride, b, shift);
+    ReferenceHadamard32x32(a, a_stride, b);
   } else if (bw == 16 && bh == 16) {
-    ReferenceHadamard16x16(a, a_stride, b, shift);
+    ReferenceHadamard16x16(a, a_stride, b);
   } else if (bw == 8 && bh == 8) {
     ReferenceHadamard8x8(a, a_stride, b);
   } else if (bw == 4 && bh == 4) {
@@ -232,12 +199,10 @@ template <typename OutputType, typename HadamardFuncType>
 class HadamardTestBase
     : public ::testing::TestWithParam<FuncWithSize<HadamardFuncType>> {
  public:
-  HadamardTestBase(const FuncWithSize<HadamardFuncType> &func_param,
-                   bool do_shift) {
+  explicit HadamardTestBase(const FuncWithSize<HadamardFuncType> &func_param) {
     h_func_ = func_param.func;
     bw_ = func_param.block_width;
     bh_ = func_param.block_height;
-    shift_ = do_shift;
   }
 
   virtual void SetUp() { rnd_.Reset(ACMRandom::DeterministicSeed()); }
@@ -257,8 +222,13 @@ class HadamardTestBase
     memset(b_ref, 0, sizeof(b_ref));
 
     for (int i = 0; i < block_size_; ++i) a[i] = Rand();
-    ReferenceHadamard(a, bw_, b_ref, bw_, bh_, shift_);
+
+    ReferenceHadamard(a, bw_, b_ref, bw_, bh_);
     API_REGISTER_STATE_CHECK(h_func_(a, bw_, b));
+
+    // The order of the output is not important. Sort before checking.
+    std::sort(b, b + block_size_);
+    std::sort(b_ref, b_ref + block_size_);
     EXPECT_EQ(memcmp(b, b_ref, sizeof(b)), 0);
   }
 
@@ -276,8 +246,12 @@ class HadamardTestBase
       memset(b, 0, sizeof(b));
       memset(b_ref, 0, sizeof(b_ref));
 
-      ReferenceHadamard(a, i, b_ref, bw_, bh_, shift_);
+      ReferenceHadamard(a, i, b_ref, bw_, bh_);
       API_REGISTER_STATE_CHECK(h_func_(a, i, b));
+
+      // The order of the output is not important. Sort before checking.
+      std::sort(b, b + block_size_);
+      std::sort(b_ref, b_ref + block_size_);
       EXPECT_EQ(0, memcmp(b, b_ref, sizeof(b)));
     }
   }
@@ -306,12 +280,11 @@ class HadamardTestBase
   HadamardFuncType h_func_;
   int bw_;
   int bh_;
-  bool shift_;
 };
 
 class HadamardLowbdTest : public HadamardTestBase<tran_low_t, HadamardFunc> {
  public:
-  HadamardLowbdTest() : HadamardTestBase(GetParam(), /*do_shift=*/true) {}
+  HadamardLowbdTest() : HadamardTestBase(GetParam()) {}
   virtual int16_t Rand() { return rnd_.Rand9Signed(); }
 };
 
@@ -328,9 +301,7 @@ INSTANTIATE_TEST_SUITE_P(
                       HadamardFuncWithSize(&aom_hadamard_16x16_c, 16, 16),
                       HadamardFuncWithSize(&aom_hadamard_32x32_c, 32, 32)));
 
-// TODO(aomedia:3314): Disable SSE2 unit test for now, since hadamard 16x16 SSE2
-// need modifications to match C/AVX2 behavior.
-#if 0   // HAVE_SSE2
+#if HAVE_SSE2
 INSTANTIATE_TEST_SUITE_P(
     SSE2, HadamardLowbdTest,
     ::testing::Values(HadamardFuncWithSize(&aom_hadamard_4x4_sse2, 4, 4),
@@ -346,9 +317,7 @@ INSTANTIATE_TEST_SUITE_P(
                       HadamardFuncWithSize(&aom_hadamard_32x32_avx2, 32, 32)));
 #endif  // HAVE_AVX2
 
-// TODO(aomedia:3314): Disable NEON unit test for now, since hadamard 16x16 NEON
-// need modifications to match C/AVX2 behavior.
-#if 0   // HAVE_NEON
+#if HAVE_NEON
 INSTANTIATE_TEST_SUITE_P(
     NEON, HadamardLowbdTest,
     ::testing::Values(HadamardFuncWithSize(&aom_hadamard_8x8_neon, 8, 8),
@@ -358,7 +327,7 @@ INSTANTIATE_TEST_SUITE_P(
 // Tests for low precision
 class HadamardLowbdLPTest : public HadamardTestBase<int16_t, HadamardLPFunc> {
  public:
-  HadamardLowbdLPTest() : HadamardTestBase(GetParam(), /*do_shift=*/false) {}
+  HadamardLowbdLPTest() : HadamardTestBase(GetParam()) {}
   virtual int16_t Rand() { return rnd_.Rand9Signed(); }
 };
 
@@ -402,8 +371,7 @@ INSTANTIATE_TEST_SUITE_P(
 class HadamardLowbdLP8x8DualTest
     : public HadamardTestBase<int16_t, HadamardLP8x8DualFunc> {
  public:
-  HadamardLowbdLP8x8DualTest()
-      : HadamardTestBase(GetParam(), /*do_shift=*/false) {}
+  HadamardLowbdLP8x8DualTest() : HadamardTestBase(GetParam()) {}
   virtual int16_t Rand() { return rnd_.Rand9Signed(); }
 };
 

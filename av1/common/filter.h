@@ -192,14 +192,20 @@ static const InterpFilterParams
 
 // A special 2-tap bilinear filter for IntraBC chroma. IntraBC uses full pixel
 // MV for luma. If sub-sampling exists, chroma may possibly use half-pel MV.
-DECLARE_ALIGNED(256, static const int16_t,
-                av1_intrabc_bilinear_filter[2 * SUBPEL_SHIFTS]) = {
-  128, 0,  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-  64,  64, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+DECLARE_ALIGNED(256, static const InterpKernel,
+                av1_intrabc_bilinear_filter[SUBPEL_SHIFTS]) = {
+  { 0, 0, 0, 128, 0, 0, 0, 0 }, { 0, 0, 0, 0, 0, 0, 0, 0 },
+  { 0, 0, 0, 0, 0, 0, 0, 0 },   { 0, 0, 0, 0, 0, 0, 0, 0 },
+  { 0, 0, 0, 0, 0, 0, 0, 0 },   { 0, 0, 0, 0, 0, 0, 0, 0 },
+  { 0, 0, 0, 0, 0, 0, 0, 0 },   { 0, 0, 0, 0, 0, 0, 0, 0 },
+  { 0, 0, 0, 64, 64, 0, 0, 0 }, { 0, 0, 0, 0, 0, 0, 0, 0 },
+  { 0, 0, 0, 0, 0, 0, 0, 0 },   { 0, 0, 0, 0, 0, 0, 0, 0 },
+  { 0, 0, 0, 0, 0, 0, 0, 0 },   { 0, 0, 0, 0, 0, 0, 0, 0 },
+  { 0, 0, 0, 0, 0, 0, 0, 0 },   { 0, 0, 0, 0, 0, 0, 0, 0 },
 };
 
 static const InterpFilterParams av1_intrabc_filter_params = {
-  av1_intrabc_bilinear_filter, 2, BILINEAR
+  (const int16_t *)av1_intrabc_bilinear_filter, SUBPEL_TAPS, BILINEAR
 };
 
 DECLARE_ALIGNED(256, static const InterpKernel,
@@ -292,25 +298,6 @@ static INLINE void set_interp_filter_allowed_mask(uint16_t *allow_interp_mask,
 static INLINE uint8_t get_interp_filter_allowed_mask(
     uint16_t allow_interp_mask, DUAL_FILTER_TYPE filt_type) {
   return (allow_interp_mask >> filt_type) & 1;
-}
-
-static AOM_INLINE int get_filter_tap(
-    const InterpFilterParams *const filter_params, int subpel_qn) {
-  const int16_t *const filter = av1_get_interp_filter_subpel_kernel(
-      filter_params, subpel_qn & SUBPEL_MASK);
-  if (filter_params->taps == 12) {
-    return 12;
-  }
-  if (filter[0] | filter[7]) {
-    return 8;
-  }
-  if (filter[1] | filter[6]) {
-    return 6;
-  }
-  if (filter[2] | filter[5]) {
-    return 4;
-  }
-  return 2;
 }
 
 #ifdef __cplusplus

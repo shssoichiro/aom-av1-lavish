@@ -9,7 +9,7 @@
  * PATENTS file, you can obtain it at www.aomedia.org/license/patent.
  */
 
-#include "av1/qmode_rc/ratectrl_qmode.h"
+#include "av1/ratectrl_qmode.h"
 
 #include <algorithm>
 #include <array>
@@ -21,8 +21,8 @@
 #include <string>
 #include <vector>
 
-#include "av1/qmode_rc/ducky_encode.h"
-#include "av1/qmode_rc/reference_manager.h"
+#include "av1/reference_manager.h"
+#include "av1/ducky_encode.h"
 #include "test/mock_ratectrl_qmode.h"
 #include "test/video_source.h"
 #include "third_party/googletest/src/googlemock/include/gmock/gmock.h"
@@ -232,6 +232,7 @@ class RateControlQModeTest : public ::testing::Test {
     rc_param_.min_gop_show_frame_count = 4;
     rc_param_.ref_frame_table_size = 7;
     rc_param_.max_ref_frames = 7;
+    rc_param_.max_depth = 5;
     rc_param_.base_q_index = 128;
     rc_param_.frame_height = kFrameHeight;
     rc_param_.frame_width = kFrameWidth;
@@ -254,7 +255,8 @@ TEST_F(RateControlQModeTest, ConstructGopARF) {
   TestGopGlobalOrderIdx(gop_struct, global_order_idx_offset);
   TestGopGlobalCodingIdx(gop_struct, global_coding_idx_offset);
   TestColocatedShowFrame(gop_struct);
-  const int max_layer_depth = ref_frame_manager.MaxRefFrame();
+  const int max_layer_depth =
+      ref_frame_manager.ForwardMaxSize() + kLayerDepthOffset;
   TestLayerDepth(gop_struct, max_layer_depth);
   TestArfInterval(gop_struct);
 }
@@ -273,7 +275,8 @@ TEST_F(RateControlQModeTest, ConstructGopKey) {
   TestGopGlobalOrderIdx(gop_struct, global_order_idx_offset);
   TestGopGlobalCodingIdx(gop_struct, global_coding_idx_offset);
   TestColocatedShowFrame(gop_struct);
-  const int max_layer_depth = ref_frame_manager.MaxRefFrame();
+  const int max_layer_depth =
+      ref_frame_manager.ForwardMaxSize() + kLayerDepthOffset;
   TestLayerDepth(gop_struct, max_layer_depth);
   TestArfInterval(gop_struct);
 }
@@ -376,7 +379,7 @@ double TplFrameStatsAccumulateIntraCost(const TplFrameStats &frame_stats) {
   for (auto &block_stats : frame_stats.block_stats_list) {
     sum += block_stats.intra_cost;
   }
-  return std::max(sum, 1.0);
+  return sum;
 }
 
 TEST_F(RateControlQModeTest, CreateTplFrameDepStats) {
@@ -659,8 +662,8 @@ TEST(RefFrameManagerTest, GetRefFrameCount) {
   // After the first kShowExisting, the kIntermediateArf should be moved from
   // kForward to kLast due to the cur_global_order_idx_ update
   EXPECT_EQ(ref_manager.GetRefFrameCountByType(RefUpdateType::kForward), 1);
-  EXPECT_EQ(ref_manager.GetRefFrameCountByType(RefUpdateType::kBackward), 2);
-  EXPECT_EQ(ref_manager.GetRefFrameCountByType(RefUpdateType::kLast), 1);
+  EXPECT_EQ(ref_manager.GetRefFrameCountByType(RefUpdateType::kBackward), 1);
+  EXPECT_EQ(ref_manager.GetRefFrameCountByType(RefUpdateType::kLast), 2);
 
   const int second_leaf_idx = 5;
   EXPECT_EQ(type_list[second_leaf_idx], GopFrameType::kRegularLeaf);
@@ -674,8 +677,8 @@ TEST(RefFrameManagerTest, GetRefFrameCount) {
   EXPECT_EQ(ref_manager.CurGlobalOrderIdx(), 3);
   // An additional kRegularLeaf frame is added into kLast
   EXPECT_EQ(ref_manager.GetRefFrameCountByType(RefUpdateType::kForward), 1);
-  EXPECT_EQ(ref_manager.GetRefFrameCountByType(RefUpdateType::kBackward), 2);
-  EXPECT_EQ(ref_manager.GetRefFrameCountByType(RefUpdateType::kLast), 2);
+  EXPECT_EQ(ref_manager.GetRefFrameCountByType(RefUpdateType::kBackward), 1);
+  EXPECT_EQ(ref_manager.GetRefFrameCountByType(RefUpdateType::kLast), 3);
 
   const int first_overlay_idx = 6;
   EXPECT_EQ(type_list[first_overlay_idx], GopFrameType::kOverlay);
@@ -691,8 +694,8 @@ TEST(RefFrameManagerTest, GetRefFrameCount) {
   // After the kOverlay, the kRegularArf should be moved from
   // kForward to kBackward due to the cur_global_order_idx_ update
   EXPECT_EQ(ref_manager.GetRefFrameCountByType(RefUpdateType::kForward), 0);
-  EXPECT_EQ(ref_manager.GetRefFrameCountByType(RefUpdateType::kBackward), 3);
-  EXPECT_EQ(ref_manager.GetRefFrameCountByType(RefUpdateType::kLast), 2);
+  EXPECT_EQ(ref_manager.GetRefFrameCountByType(RefUpdateType::kBackward), 2);
+  EXPECT_EQ(ref_manager.GetRefFrameCountByType(RefUpdateType::kLast), 3);
 }
 
 void TestRefFrameManagerPriority(const RefFrameManager &ref_manager,
@@ -751,9 +754,9 @@ TEST(RefFrameManagerTest, GetRefFrameByPriority) {
     ref_manager.UpdateRefFrameTable(&gop_frame);
   }
 
-  EXPECT_EQ(ref_manager.GetRefFrameCountByType(RefUpdateType::kBackward), 3);
+  EXPECT_EQ(ref_manager.GetRefFrameCountByType(RefUpdateType::kBackward), 2);
   TestRefFrameManagerPriority(ref_manager, RefUpdateType::kBackward);
-  EXPECT_EQ(ref_manager.GetRefFrameCountByType(RefUpdateType::kLast), 2);
+  EXPECT_EQ(ref_manager.GetRefFrameCountByType(RefUpdateType::kLast), 3);
   TestRefFrameManagerPriority(ref_manager, RefUpdateType::kLast);
 }
 
@@ -923,6 +926,13 @@ TEST_F(RateControlQModeTest, TestInvalidMaxRefFrames) {
   EXPECT_EQ(status.code, AOM_CODEC_INVALID_PARAM);
   EXPECT_THAT(status.message,
               HasSubstr("max_ref_frames (8) must be in the range"));
+}
+
+TEST_F(RateControlQModeTest, TestInvalidMaxDepth) {
+  rc_param_.max_depth = 6;
+  Status status = AV1RateControlQMode().SetRcParam(rc_param_);
+  EXPECT_EQ(status.code, AOM_CODEC_INVALID_PARAM);
+  EXPECT_THAT(status.message, HasSubstr("max_depth (6) must be in the range"));
 }
 
 TEST_F(RateControlQModeTest, TestInvalidBaseQIndex) {

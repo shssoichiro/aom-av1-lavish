@@ -27,7 +27,6 @@ typedef struct {
 } TuneButteraugliInfo;
 
 struct AV1_COMP;
-static const BLOCK_SIZE butteraugli_rdo_bsize = BLOCK_16X16;
 
 void av1_set_butteraugli_rdmult(const struct AV1_COMP *cpi, MACROBLOCK *x,
                                 BLOCK_SIZE bsize, int mi_row, int mi_col,
