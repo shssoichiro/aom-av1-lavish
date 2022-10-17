@@ -48,6 +48,12 @@ static const struct arg_enum_list tuning_enum[] = {
   { "vmaf_neg", AOM_TUNE_VMAF_NEG_MAX_GAIN },
   { "butteraugli", AOM_TUNE_BUTTERAUGLI },
   { "vmaf_saliency_map", AOM_TUNE_VMAF_SALIENCY_MAP },
+  { "lavish", AOM_TUNE_LAVISH },
+  { "lavish_fast", AOM_TUNE_LAVISH_FAST },
+  { "ipq", AOM_TUNE_IMAGE_PERCEPTUAL_QUALITY },
+  { "ipq_vmaf_psy", AOM_TUNE_IMAGE_PERCEPTUAL_QUALITY_VMAF_PSY_QP }, // Tunes at this point and after use VMAF Q Adjustment
+  { "vmaf_psy_qp", AOM_TUNE_FAST_VMAF_PSY_QP },
+  { "omni", AOM_TUNE_OMNI },
   { NULL, 0 }
 };
 

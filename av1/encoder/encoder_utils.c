@@ -1359,22 +1359,67 @@ void av1_set_mb_ssim_rdmult_scaling(AV1_COMP *cpi) {
           num_of_var += 1.0;
         }
       }
-      var = var / num_of_var;
+      if (cpi->oxcf.tune_cfg.tuning == AOM_TUNE_IMAGE_PERCEPTUAL_QUALITY ||
+        cpi->oxcf.tune_cfg.tuning == AOM_TUNE_IMAGE_PERCEPTUAL_QUALITY_VMAF_PSY_QP ||
+        cpi->oxcf.tune_cfg.tuning == AOM_TUNE_LAVISH ||
+        cpi->oxcf.tune_cfg.tuning == AOM_TUNE_LAVISH_FAST ||
+        cpi->oxcf.tune_cfg.tuning == AOM_TUNE_OMNI) {
+        var = exp(var_log / num_of_var);
+        const int cq_level = cpi->oxcf.rc_cfg.cq_level;
+        double hq_level = 30 * 4;
+        double delta;
+        if (cpi->oxcf.tune_cfg.tuning == AOM_TUNE_LAVISH || cpi->oxcf.tune_cfg.tuning == AOM_TUNE_LAVISH_FAST || cpi->oxcf.tune_cfg.tuning == AOM_TUNE_OMNI) { // CLYBPATCH TODO: Do more extensive tuning for omni/lavish
+          hq_level = 30 * 2;
+          delta =
+            cq_level < hq_level
+                ? 0.5 * (double)(hq_level - cq_level) / hq_level
+                : 20.0 * (double)(cq_level - hq_level) / (MAXQ - hq_level);
+        } else {
+          delta =
+            cq_level < hq_level
+                ? 0.5 * (double)(hq_level - cq_level) / hq_level
+                : 10.0 * (double)(cq_level - hq_level) / (MAXQ - hq_level);
+        }
+        // Curve fitting with an exponential model on user rating dataset.
+        var = 39.126 * (1 - exp(-0.0009413 * var)) + 1.236 + delta;
+      } else {
+        var = var / num_of_var;
+        // Curve fitting with an exponential model on all 16x16 blocks from the
+        // midres dataset.
+        var = 67.035434 * (1 - exp(-0.0021489 * var)) + 17.492222;
 
-      // Curve fitting with an exponential model on all 16x16 blocks from the
-      // midres dataset.
-      var = 67.035434 * (1 - exp(-0.0021489 * var)) + 17.492222;
-
-      // As per the above computation, var will be in the range of
-      // [17.492222, 84.527656], assuming the data type is of infinite
-      // precision. The following assert conservatively checks if var is in the
-      // range of [17.0, 85.0] to avoid any issues due to the precision of the
-      // relevant data type.
-      assert(var > 17.0 && var < 85.0);
+        // As per the above computation, var will be in the range of
+        // [17.492222, 84.527656], assuming the data type is of infinite
+        // precision. The following assert conservatively checks if var is in the
+        // range of [17.0, 85.0] to avoid any issues due to the precision of the
+        // relevant data type.
+        assert(var > 17.0 && var < 85.0);
+      }
       cpi->ssim_rdmult_scaling_factors[index] = var;
       log_sum += log(var);
     }
   }
+  if ((cpi->oxcf.tune_cfg.tuning == AOM_TUNE_IMAGE_PERCEPTUAL_QUALITY &&
+      cpi->oxcf.q_cfg.deltaq_mode != NO_DELTA_Q) ||
+      (cpi->oxcf.tune_cfg.tuning == AOM_TUNE_IMAGE_PERCEPTUAL_QUALITY_VMAF_PSY_QP &&
+      cpi->oxcf.q_cfg.deltaq_mode != NO_DELTA_Q) ||
+      (cpi->oxcf.tune_cfg.tuning == AOM_TUNE_LAVISH &&
+      cpi->oxcf.q_cfg.deltaq_mode != NO_DELTA_Q) ||
+      (cpi->oxcf.tune_cfg.tuning == AOM_TUNE_LAVISH_FAST &&
+      cpi->oxcf.q_cfg.deltaq_mode != NO_DELTA_Q) ||
+      (cpi->oxcf.tune_cfg.tuning == AOM_TUNE_OMNI &&
+      cpi->oxcf.q_cfg.deltaq_mode != NO_DELTA_Q)) {
+    const int sb_size = cpi->common.seq_params->sb_size;
+    const int num_mi_w_sb = mi_size_wide[sb_size];
+    const int num_mi_h_sb = mi_size_high[sb_size];
+    const int num_cols_sb =
+        (mi_params->mi_cols + num_mi_w_sb - 1) / num_mi_w_sb;
+    const int num_rows_sb =
+        (mi_params->mi_rows + num_mi_h_sb - 1) / num_mi_h_sb;
+    const int num_blk_w = num_mi_w_sb / num_mi_w;
+    const int num_blk_h = num_mi_h_sb / num_mi_h;
+    assert(num_blk_w * num_mi_w == num_mi_w_sb);
+    assert(num_blk_h * num_mi_h == num_mi_h_sb);
 
   // As log_sum holds the geometric mean, it will be in the range
   // [17.492222, 84.527656]. Hence, in the below loop, the value of

@@ -4465,7 +4465,7 @@ static int inter_mode_search_order_independent_skip(
       // Disable intra modes other than DC_PRED for blocks with low variance
       // Threshold for intra skipping based on source variance
       // TODO(debargha): Specialize the threshold for super block sizes
-      const unsigned int skip_intra_var_thresh = 64;
+      const unsigned int skip_intra_var_thresh = (cpi->oxcf.tune_cfg.content == AOM_CONTENT_PSY) ? 0 : 64;
       if ((sf->rt_sf.mode_search_skip_flags & FLAG_SKIP_INTRA_LOWVAR) &&
           x->source_variance < skip_intra_var_thresh)
         return 1;
@@ -6049,6 +6049,31 @@ void av1_rd_pick_inter_mode(struct AV1_COMP *cpi, struct TileDataEnc *tile_data,
     if (sf->inter_sf.prune_compound_using_single_ref && is_single_pred &&
         this_rd < ref_frame_rd[ref_frame]) {
       ref_frame_rd[ref_frame] = this_rd;
+    }
+
+      // In film mode bias against DC pred and other intra if there is a
+      // significant difference between the variance of the sub blocks in the
+      // the source. Also apply some bias against compound modes which also
+      // tend to blur fine texture such as film grain over time.
+      //
+      // The sub block test here acts in the case where one or more sub
+      // blocks have high relatively variance but others relatively low
+      // variance. Here the high variance sub blocks may push the
+      // total variance for the current block size over the thresholds
+      // used in rd_variance_adjustment() below.
+    if (cpi->oxcf.tune_cfg.content == AOM_CONTENT_PSY) { // Preliminary tune-content=film implementation from VP9
+      if (bsize >= BLOCK_16X16) {
+        double var_min, var_max;
+        log_sub_block_var(cpi, x, bsize, &var_min, &var_max);
+        if (ref_frame == INTRA_FRAME) {
+          if (this_mode == DC_PRED)
+            this_rd += (int64_t)(this_rd * (var_max - var_min));
+          else
+            this_rd += (int64_t)(this_rd * (var_max - var_min)) / 4;
+        } else if (second_ref_frame > INTRA_FRAME) {
+          this_rd += this_rd / 4;
+        }
+      }
     }
 
     // Did this mode help, i.e., is it the new best mode
