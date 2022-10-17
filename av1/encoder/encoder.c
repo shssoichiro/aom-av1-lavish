@@ -3646,6 +3646,7 @@ static int encode_frame_to_data_rate(AV1_COMP *cpi, size_t *size,
       oxcf->tune_cfg.tuning == AOM_TUNE_IMAGE_PERCEPTUAL_QUALITY ||
       oxcf->tune_cfg.tuning == AOM_TUNE_IMAGE_PERCEPTUAL_QUALITY_VMAF_PSY_QP ||
       oxcf->tune_cfg.tuning == AOM_TUNE_LAVISH ||
+      oxcf->tune_cfg.tuning == AOM_TUNE_LAVISH_FAST ||
       oxcf->tune_cfg.tuning == AOM_TUNE_OMNI) {
     av1_set_mb_ssim_rdmult_scaling(cpi);
   }

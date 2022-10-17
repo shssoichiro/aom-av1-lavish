@@ -1303,12 +1303,13 @@ void av1_set_mb_ssim_rdmult_scaling(AV1_COMP *cpi) {
       if (cpi->oxcf.tune_cfg.tuning == AOM_TUNE_IMAGE_PERCEPTUAL_QUALITY ||
       cpi->oxcf.tune_cfg.tuning == AOM_TUNE_IMAGE_PERCEPTUAL_QUALITY_VMAF_PSY_QP ||
       cpi->oxcf.tune_cfg.tuning == AOM_TUNE_LAVISH ||
+      cpi->oxcf.tune_cfg.tuning == AOM_TUNE_LAVISH_FAST ||
       cpi->oxcf.tune_cfg.tuning == AOM_TUNE_OMNI) {
         var = exp(var_log / num_of_var);
         const int cq_level = cpi->oxcf.rc_cfg.cq_level;
         double hq_level = 30 * 4;
         double delta;
-        if (cpi->oxcf.tune_cfg.tuning == AOM_TUNE_LAVISH || cpi->oxcf.tune_cfg.tuning == AOM_TUNE_OMNI) { // CLYBPATCH TODO: Do more extensive tuning for omni/lavish
+        if (cpi->oxcf.tune_cfg.tuning == AOM_TUNE_LAVISH || cpi->oxcf.tune_cfg.tuning == AOM_TUNE_LAVISH_FAST || cpi->oxcf.tune_cfg.tuning == AOM_TUNE_OMNI) { // CLYBPATCH TODO: Do more extensive tuning for omni/lavish
           hq_level = 30 * 2;
           delta =
             cq_level < hq_level
@@ -1337,6 +1338,8 @@ void av1_set_mb_ssim_rdmult_scaling(AV1_COMP *cpi) {
       (cpi->oxcf.tune_cfg.tuning == AOM_TUNE_IMAGE_PERCEPTUAL_QUALITY_VMAF_PSY_QP &&
       cpi->oxcf.q_cfg.deltaq_mode != NO_DELTA_Q) ||
       (cpi->oxcf.tune_cfg.tuning == AOM_TUNE_LAVISH &&
+      cpi->oxcf.q_cfg.deltaq_mode != NO_DELTA_Q) ||
+      (cpi->oxcf.tune_cfg.tuning == AOM_TUNE_LAVISH_FAST &&
       cpi->oxcf.q_cfg.deltaq_mode != NO_DELTA_Q) ||
       (cpi->oxcf.tune_cfg.tuning == AOM_TUNE_OMNI &&
       cpi->oxcf.q_cfg.deltaq_mode != NO_DELTA_Q)) {

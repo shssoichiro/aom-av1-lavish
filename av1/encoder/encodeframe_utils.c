@@ -37,6 +37,7 @@ void av1_set_ssim_rdmult(const AV1_COMP *const cpi, int *errorperbit,
          cpi->oxcf.tune_cfg.tuning == AOM_TUNE_IMAGE_PERCEPTUAL_QUALITY ||
          cpi->oxcf.tune_cfg.tuning == AOM_TUNE_IMAGE_PERCEPTUAL_QUALITY_VMAF_PSY_QP ||
          cpi->oxcf.tune_cfg.tuning == AOM_TUNE_LAVISH ||
+         cpi->oxcf.tune_cfg.tuning == AOM_TUNE_LAVISH_FAST ||
          cpi->oxcf.tune_cfg.tuning == AOM_TUNE_OMNI);
 
   for (row = mi_row / num_mi_w;
