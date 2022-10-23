@@ -200,10 +200,8 @@ struct av1_extracfg {
   int ssim_rd_mult;
   int luma_bias;
   int vmaf_preprocessing;
-#if CONFIG_TUNE_BUTTERAUGLI
   int butteraugli_resize_factor;
   int butteraugli_rd_mult;
-#endif
   int loopfilter_sharpness;
   int enable_experimental_psy;
 };
@@ -378,10 +376,8 @@ static const struct av1_extracfg default_extra_cfg = {
   100,             // ssim_rd_mult
   1,               // luma_bias
   0,               // vmaf_preprocessing
-#if CONFIG_TUNE_BUTTERAUGLI
   1,               // butteraugli_resize_factor
   100,             // butteraugli_rd_mult
-#endif
   0,               // loopfilter_sharpness
   0,               // enable_experimental_psy
 };
@@ -542,10 +538,8 @@ static const struct av1_extracfg default_extra_cfg = {
   100,             // ssim_rd_mult
   1,               // luma_bias
   0,               // vmaf_preprocessing
-#if CONFIG_TUNE_BUTTERAUGLI
   1,               // butteraugli_resize_factor
   100,             // butteraugli_rd_mult
-#endif
   0,               // loopfilter_sharpness
   0,               // enable_experimental_psy
 };
