@@ -196,7 +196,7 @@ static void set_mb_butteraugli_rdmult_scaling(AV1_COMP *cpi,
 void av1_set_butteraugli_rdmult(const AV1_COMP *cpi, MACROBLOCK *x,
                                 BLOCK_SIZE bsize, int mi_row, int mi_col,
                                 int *rdmult) {
-  assert(cpi->oxcf.tune_cfg.tuning == AOM_TUNE_BUTTERAUGLI || cpi->oxcf.tune_cfg.tuning == AOM_TUNE_LAVISH || cpi->oxcf.tune_cfg.tuning == AOM_TUNE_OMNI);
+  assert(cpi->oxcf.tune_cfg.tuning == AOM_TUNE_BUTTERAUGLI || cpi->oxcf.tune_cfg.tuning == AOM_TUNE_LAVISH);
   if (!cpi->butteraugli_info.recon_set) {
     return;
   }
@@ -221,7 +221,7 @@ void av1_set_butteraugli_rdmult(const AV1_COMP *cpi, MACROBLOCK *x,
       num_of_mi += 1.0;
     }
   }
-  geom_mean_of_scale = exp(geom_mean_of_scale / num_of_mi);
+  geom_mean_of_scale = exp((geom_mean_of_scale * cpi->oxcf.butteraugli_rd_mult / 100.0) / num_of_mi);
 
   *rdmult = (int)((double)(*rdmult) * geom_mean_of_scale + 0.5);
   *rdmult = AOMMAX(*rdmult, 0);
@@ -331,17 +331,14 @@ void av1_setup_butteraugli_source(AV1_COMP *cpi) {
   }
   av1_resize_and_extend_frame_nonnormative(cpi->source, resized_dst, bit_depth,
                                            av1_num_planes(cm));
-  if (cpi->oxcf.butteraugli_resize_factor == 0) { // Do not resize copied image if resize is 0
-    resize_factor = 2;
-  }
   if (cm->seq_params->use_highbitdepth) {
     zero_img_highbd(cpi->source);
-    copy_img_highbd(resized_dst, cpi->source, width / (resize_factor / 2), // Do not resize copied image if resize is 1
-            height / (resize_factor / 2));
+    copy_img_highbd(resized_dst, cpi->source, width / resize_factor,
+            height / resize_factor);
   } else {
     zero_img_lowbd(cpi->source);
-    copy_img_lowbd(resized_dst, cpi->source, width / (resize_factor / 2),
-            height  / (resize_factor / 2));
+    copy_img_lowbd(resized_dst, cpi->source, width / resize_factor,
+            height / resize_factor);
   }
 }
 
@@ -436,7 +433,7 @@ void av1_setup_butteraugli_rdmult(AV1_COMP *cpi) {
 
   av1_set_variance_partition_thresholds(cpi, q_index, 0);
   av1_encode_frame(cpi);
-  if (cpi->oxcf.tune_cfg.tuning == AOM_TUNE_LAVISH || cpi->oxcf.tune_cfg.tuning == AOM_TUNE_OMNI) {
+  if (cpi->oxcf.tune_cfg.tuning == AOM_TUNE_LAVISH) {
     av1_setup_butteraugli_rdmult_and_restore_source(cpi, 0.6);
   } else {
     av1_setup_butteraugli_rdmult_and_restore_source(cpi, 0.3);

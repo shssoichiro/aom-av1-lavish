@@ -1309,12 +1309,18 @@ void av1_set_mb_ssim_rdmult_scaling(AV1_COMP *cpi) {
         const int cq_level = cpi->oxcf.rc_cfg.cq_level;
         double hq_level = 30 * 4;
         double delta;
-        if (cpi->oxcf.tune_cfg.tuning == AOM_TUNE_LAVISH || cpi->oxcf.tune_cfg.tuning == AOM_TUNE_LAVISH_FAST || cpi->oxcf.tune_cfg.tuning == AOM_TUNE_OMNI) { // CLYBPATCH TODO: Do more extensive tuning for omni/lavish
+        if (cpi->oxcf.tune_cfg.tuning == AOM_TUNE_LAVISH || cpi->oxcf.tune_cfg.tuning == AOM_TUNE_LAVISH_FAST) { // CLYBPATCH TODO: Do more extensive tuning for omni/lavish
           hq_level = 30 * 2;
           delta =
             cq_level < hq_level
                 ? 0.5 * (double)(hq_level - cq_level) / hq_level
                 : 20.0 * (double)(cq_level - hq_level) / (MAXQ - hq_level);
+        } else if (cpi->oxcf.tune_cfg.tuning == AOM_TUNE_OMNI) {
+          hq_level = 42 * 2;
+          delta =
+            cq_level < hq_level
+                ? 0.333 * (double)(hq_level - cq_level) / hq_level
+                : 16.667 * (double)(cq_level - hq_level) / (MAXQ - hq_level);
         } else {
           delta =
             cq_level < hq_level

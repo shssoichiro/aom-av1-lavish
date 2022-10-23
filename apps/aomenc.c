@@ -251,7 +251,10 @@ static const int av1_arg_ctrl_map[] = { AOME_SET_CPUUSED,
 #if CONFIG_TUNE_BUTTERAUGLI
                                         AOME_SET_BUTTERAUGLI_RDO_BSIZE,
                                         AOME_SET_BUTTERAUGLI_RESIZE_FACTOR,
+                                        AOME_SET_BUTTERAUGLI_RD_MULT,
 #endif
+                                        AOME_SET_LOOPFILTER_SHARPNESS,
+                                        AOME_SET_ENABLE_EXPERIMENTAL_PSY,
                                         0 };
 
 const arg_def_t *main_args[] = { &g_av1_codec_arg_defs.help,
@@ -470,7 +473,10 @@ const arg_def_t *av1_ctrl_args[] = {
 #if CONFIG_TUNE_BUTTERAUGLI
   &g_av1_codec_arg_defs.butteraugli_rdo_bsize,
   &g_av1_codec_arg_defs.butteraugli_resize_factor,
+  &g_av1_codec_arg_defs.butteraugli_rd_mult,
 #endif
+  &g_av1_codec_arg_defs.loopfilter_sharpness,
+  &g_av1_codec_arg_defs.enable_experimental_psy,
   NULL,
 };
 

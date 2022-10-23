@@ -1091,7 +1091,13 @@ typedef struct AV1EncoderConfig {
   BLOCK_SIZE butteraugli_rdo_bsize;
 
   int butteraugli_resize_factor;
+
+  int butteraugli_rd_mult;
 #endif
+
+  int loopfilter_sharpness;
+
+  bool enable_experimental_psy;
   /*!\endcond */
 } AV1EncoderConfig;
 

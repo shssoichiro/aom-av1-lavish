@@ -201,7 +201,7 @@ void av1_pick_filter_level(const YV12_BUFFER_CONFIG *sd, AV1_COMP *cpi,
   int disable_filter_rt_screen = 0;
   (void)sd;
 
-  lf->sharpness_level = 0;
+  lf->sharpness_level = cpi->oxcf.loopfilter_sharpness;
   cpi->td.mb.rdmult = cpi->rd.RDMULT;
 
   if (cpi->oxcf.tune_cfg.content == AOM_CONTENT_SCREEN &&

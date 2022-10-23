@@ -4415,7 +4415,7 @@ static int inter_mode_search_order_independent_skip(
       // Disable intra modes other than DC_PRED for blocks with low variance
       // Threshold for intra skipping based on source variance
       // TODO(debargha): Specialize the threshold for super block sizes
-      const unsigned int skip_intra_var_thresh = (cpi->oxcf.tune_cfg.content == AOM_CONTENT_PSY) ? 0 : 64;
+      const unsigned int skip_intra_var_thresh = (cpi->oxcf.enable_experimental_psy == 1) ? 0 : 64;
       if ((sf->rt_sf.mode_search_skip_flags & FLAG_SKIP_INTRA_LOWVAR) &&
           x->source_variance < skip_intra_var_thresh)
         return 1;
@@ -6011,7 +6011,7 @@ void av1_rd_pick_inter_mode(struct AV1_COMP *cpi, struct TileDataEnc *tile_data,
       // variance. Here the high variance sub blocks may push the
       // total variance for the current block size over the thresholds
       // used in rd_variance_adjustment() below.
-    if (cpi->oxcf.tune_cfg.content == AOM_CONTENT_PSY) { // Preliminary tune-content=film implementation from VP9
+    if (cpi->oxcf.enable_experimental_psy == 1) { // Preliminary tune-content=film implementation from VP9
       if (bsize >= BLOCK_16X16) {
         double var_min, var_max;
         log_sub_block_var(cpi, x, bsize, &var_min, &var_max);

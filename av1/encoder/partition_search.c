@@ -619,6 +619,17 @@ static void setup_block_rdmult(const AV1_COMP *const cpi, MACROBLOCK *const x,
       cpi->oxcf.tune_cfg.tuning == AOM_TUNE_VMAF_NEG_MAX_GAIN) {
     av1_set_vmaf_rdmult(cpi, x, bsize, mi_row, mi_col, &x->rdmult);
   }
+  if (cpi->oxcf.tune_cfg.tuning == AOM_TUNE_OMNI) { // Experimenting with av1_set_error_per_bit
+    int ssim_rdmult = x->rdmult;
+    int error_per_bit = x->errorperbit;
+    av1_set_ssim_rdmult(cpi, &error_per_bit, bsize, mi_row, mi_col,
+                        &ssim_rdmult);
+
+    x->rdmult = (int) (((int64_t)(ssim_rdmult * 2.5) + (int64_t)(x->rdmult)) / 3.5);
+    //////error_per_bit = (int) (((int64_t)(error_per_bit * 2.5) + (int64_t)(x->errorperbit)) / 3.5);
+    //////av1_set_error_per_bit(&x->errorperbit, ssim_rdmult);
+    x->errorperbit = (int) (((int64_t)(error_per_bit * 2.5) + (int64_t)(x->errorperbit)) / 3.5);
+  }
 #endif
 #if CONFIG_TUNE_BUTTERAUGLI
   if (cpi->oxcf.tune_cfg.tuning == AOM_TUNE_BUTTERAUGLI) {
@@ -626,7 +637,7 @@ static void setup_block_rdmult(const AV1_COMP *const cpi, MACROBLOCK *const x,
   }
 
 #if CONFIG_TUNE_VMAF
-  if (cpi->oxcf.tune_cfg.tuning == AOM_TUNE_OMNI || cpi->oxcf.tune_cfg.tuning == AOM_TUNE_LAVISH) {
+  if (cpi->oxcf.tune_cfg.tuning == AOM_TUNE_LAVISH) {
     int ssim_rdmult = x->rdmult;
     av1_set_ssim_rdmult(cpi, &x->errorperbit, bsize, mi_row, mi_col,
                         &ssim_rdmult);
@@ -636,6 +647,17 @@ static void setup_block_rdmult(const AV1_COMP *const cpi, MACROBLOCK *const x,
     x->rdmult = (int) (((int64_t)(ssim_rdmult * 2.5) + (int64_t)(butteraugli_rdmult)) / 3.5);
   }
 #endif
+#endif
+#if CONFIG_TUNE_VMAF
+  if (cpi->oxcf.tune_cfg.tuning == AOM_TUNE_LAVISH_VMAF_RD) {
+    int vmaf_rdmult = x->rdmult;
+    av1_set_vmaf_rdmult(cpi, x, bsize, mi_row, mi_col, &vmaf_rdmult);
+    int ssim_rdmult = x->rdmult;
+    av1_set_ssim_rdmult(cpi, &x->errorperbit, bsize, mi_row, mi_col,
+                        &ssim_rdmult);
+
+    x->rdmult = (int) (((int64_t)(vmaf_rdmult * 2.5) + (int64_t)(ssim_rdmult)) / 3.5);
+  }
 #endif
   if (cpi->oxcf.mode == ALLINTRA || cpi->oxcf.tune_cfg.content == AOM_CONTENT_PSY) {
     x->rdmult = (int)(((int64_t)x->rdmult * x->intra_sb_rdmult_modifier) >> 7);

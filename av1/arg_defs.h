@@ -246,7 +246,10 @@ typedef struct av1_codec_arg_definitions {
 #if CONFIG_TUNE_BUTTERAUGLI
   arg_def_t butteraugli_rdo_bsize;
   arg_def_t butteraugli_resize_factor;
+  arg_def_t butteraugli_rd_mult;
 #endif
+  arg_def_t loopfilter_sharpness;
+  arg_def_t enable_experimental_psy;
 #endif  // CONFIG_AV1_ENCODER
 } av1_codec_arg_definitions_t;
 
