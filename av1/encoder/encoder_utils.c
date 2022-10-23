@@ -1360,20 +1360,28 @@ void av1_set_mb_ssim_rdmult_scaling(AV1_COMP *cpi) {
         }
       }
       if (cpi->oxcf.tune_cfg.tuning == AOM_TUNE_IMAGE_PERCEPTUAL_QUALITY ||
-        cpi->oxcf.tune_cfg.tuning == AOM_TUNE_IMAGE_PERCEPTUAL_QUALITY_VMAF_PSY_QP ||
-        cpi->oxcf.tune_cfg.tuning == AOM_TUNE_LAVISH ||
-        cpi->oxcf.tune_cfg.tuning == AOM_TUNE_LAVISH_FAST ||
-        cpi->oxcf.tune_cfg.tuning == AOM_TUNE_OMNI) {
+      cpi->oxcf.tune_cfg.tuning == AOM_TUNE_IMAGE_PERCEPTUAL_QUALITY_VMAF_PSY_QP ||
+      cpi->oxcf.tune_cfg.tuning == AOM_TUNE_LAVISH ||
+      cpi->oxcf.tune_cfg.tuning == AOM_TUNE_LAVISH_FAST ||
+      cpi->oxcf.tune_cfg.tuning == AOM_TUNE_OMNI) {
         var = exp(var_log / num_of_var);
-        const int cq_level = cpi->oxcf.rc_cfg.cq_level;
+        int cq_level = cpi->oxcf.rc_cfg.cq_level;
         double hq_level = 30 * 4;
         double delta;
-        if (cpi->oxcf.tune_cfg.tuning == AOM_TUNE_LAVISH || cpi->oxcf.tune_cfg.tuning == AOM_TUNE_LAVISH_FAST || cpi->oxcf.tune_cfg.tuning == AOM_TUNE_OMNI) { // CLYBPATCH TODO: Do more extensive tuning for omni/lavish
-          hq_level = 30 * 2;
+        if (cpi->oxcf.tune_cfg.tuning == AOM_TUNE_LAVISH ||
+        cpi->oxcf.tune_cfg.tuning == AOM_TUNE_LAVISH_FAST) { // Sharper RD to mix with Butteraugli
+          hq_level = 30 * 4;
+          cq_level = xd->current_base_qindex;
           delta =
             cq_level < hq_level
-                ? 0.5 * (double)(hq_level - cq_level) / hq_level
-                : 20.0 * (double)(cq_level - hq_level) / (MAXQ - hq_level);
+                ? 0.25 * (double)(hq_level - cq_level) / hq_level
+                : 3.333 * (double)(cq_level - hq_level) / (MAXQ - hq_level);
+        } else if (cpi->oxcf.tune_cfg.tuning == AOM_TUNE_OMNI) { // Slightly less sharp RD for non-butter
+          hq_level = 42 * 2;
+          delta =
+            cq_level < hq_level
+                ? 0.333 * (double)(hq_level - cq_level) / hq_level
+                : 16.667 * (double)(cq_level - hq_level) / (MAXQ - hq_level);
         } else {
           delta =
             cq_level < hq_level

@@ -1539,6 +1539,7 @@ AV1_COMP *av1_create_compressor(AV1_PRIMARY *ppi, const AV1EncoderConfig *oxcf,
 
 #if CONFIG_TUNE_BUTTERAUGLI
   {
+    const BLOCK_SIZE butteraugli_rdo_bsize = BLOCK_8X8;
     const int w = mi_size_wide[butteraugli_rdo_bsize];
     const int h = mi_size_high[butteraugli_rdo_bsize];
     const int num_cols = (mi_params->mi_cols + w - 1) / w;
@@ -2539,7 +2540,7 @@ static int encode_without_recode(AV1_COMP *cpi) {
 #endif
 
 #if CONFIG_TUNE_BUTTERAUGLI
-  if (cpi->oxcf.tune_cfg.tuning == AOM_TUNE_BUTTERAUGLI) {
+  if (cpi->oxcf.tune_cfg.tuning == AOM_TUNE_BUTTERAUGLI || cpi->oxcf.tune_cfg.tuning == AOM_TUNE_LAVISH) {
     av1_setup_butteraugli_rdmult(cpi);
   }
 #endif
@@ -2841,7 +2842,7 @@ static int encode_with_recode_loop(AV1_COMP *cpi, size_t *size, uint8_t *dest) {
         false, false, cpi->oxcf.border_in_pixels, cpi->image_pyramid_levels);
 
 #if CONFIG_TUNE_BUTTERAUGLI
-    if (oxcf->tune_cfg.tuning == AOM_TUNE_BUTTERAUGLI) {
+    if (oxcf->tune_cfg.tuning == AOM_TUNE_BUTTERAUGLI || oxcf->tune_cfg.tuning == AOM_TUNE_LAVISH) {
       if (loop_count == 0) {
         original_q = q;
         // TODO(sdeng): different q here does not make big difference. Use a
@@ -3068,9 +3069,14 @@ static int encode_with_recode_loop(AV1_COMP *cpi, size_t *size, uint8_t *dest) {
     }
 
 #if CONFIG_TUNE_BUTTERAUGLI
-    if (loop_count == 0 && oxcf->tune_cfg.tuning == AOM_TUNE_BUTTERAUGLI) {
+    if (loop_count == 0 && (oxcf->tune_cfg.tuning == AOM_TUNE_BUTTERAUGLI ||
+        oxcf->tune_cfg.tuning == AOM_TUNE_LAVISH)) {
       loop = 1;
-      av1_setup_butteraugli_rdmult_and_restore_source(cpi, 0.4);
+      if (oxcf->tune_cfg.tuning == AOM_TUNE_LAVISH) {
+        av1_setup_butteraugli_rdmult_and_restore_source(cpi, 0.8);
+      } else {
+        av1_setup_butteraugli_rdmult_and_restore_source(cpi, 0.4);
+      }
     }
 #endif
 
@@ -3773,8 +3779,9 @@ static int encode_frame_to_data_rate(AV1_COMP *cpi, size_t *size,
 #endif
 #if CONFIG_TUNE_VMAF
   else if (oxcf->tune_cfg.tuning == AOM_TUNE_VMAF_WITHOUT_PREPROCESSING ||
-           oxcf->tune_cfg.tuning == AOM_TUNE_VMAF_MAX_GAIN ||
-           oxcf->tune_cfg.tuning == AOM_TUNE_VMAF_NEG_MAX_GAIN) {
+      oxcf->tune_cfg.tuning == AOM_TUNE_VMAF_MAX_GAIN ||
+      oxcf->tune_cfg.tuning == AOM_TUNE_VMAF_NEG_MAX_GAIN ||
+      oxcf->tune_cfg.tuning == AOM_TUNE_LAVISH_VMAF_RD) {
     av1_set_mb_vmaf_rdmult_scaling(cpi);
   }
 #endif

@@ -21,38 +21,49 @@
 
 static const int resize_factor = 2;
 
+static const int resize_factor = 2;
+
 static void set_mb_butteraugli_rdmult_scaling(AV1_COMP *cpi,
                                               const YV12_BUFFER_CONFIG *source,
                                               const YV12_BUFFER_CONFIG *recon,
                                               const double K) {
   AV1_COMMON *const cm = &cpi->common;
   SequenceHeader *const seq_params = cm->seq_params;
-  const CommonModeInfoParams *const mi_params = &cm->mi_params;
+  //const CommonModeInfoParams *const mi_params = &cm->mi_params;
   const aom_color_range_t color_range =
       seq_params->color_range != 0 ? AOM_CR_FULL_RANGE : AOM_CR_STUDIO_RANGE;
   const int bit_depth = cpi->td.mb.e_mbd.bd;
-  const int width = source->y_crop_width;
-  const int height = source->y_crop_height;
+  const int origWidth = source->y_width;
+  const int origHeight = source->y_height;
+  const int width = origWidth / resize_factor;
+  const int height = origHeight / resize_factor;
   const int ss_x = source->subsampling_x;
   const int ss_y = source->subsampling_y;
-
+  const BLOCK_SIZE butteraugli_rdo_bsize = BLOCK_4X4;
+  /*if (cpi->oxcf.butteraugli_intensity_target > 1) {
+    bsize = BLOCK_16X16;
+  } else if (cpi->oxcf.butteraugli_intensity_target > 0) {
+    bsize = BLOCK_16X16;
+  } else {
+    bsize = BLOCK_8X8;
+  }*/
   float *diffmap;
-  CHECK_MEM_ERROR(cm, diffmap, aom_malloc(width * height * sizeof(*diffmap)));
+  CHECK_MEM_ERROR(cm, diffmap, aom_malloc(origWidth * origHeight * sizeof(*diffmap)));
   if (!aom_calc_butteraugli(source, recon, bit_depth,
                             seq_params->matrix_coefficients, color_range,
-                            diffmap)) {
+                            diffmap, cpi->oxcf.butteraugli_intensity_target, cpi->oxcf.butteraugli_hf_asymmetry)) {
     aom_internal_error(cm->error, AOM_CODEC_ERROR,
                        "Failed to calculate Butteraugli distances.");
   }
 
-  const int num_mi_w = mi_size_wide[butteraugli_rdo_bsize] / resize_factor;
-  const int num_mi_h = mi_size_high[butteraugli_rdo_bsize] / resize_factor;
+  const int num_mi_w = mi_size_wide[butteraugli_rdo_bsize] * 2; // WORKING
+  const int num_mi_h = mi_size_high[butteraugli_rdo_bsize] * 2;
   const int num_cols =
-      (mi_params->mi_cols / resize_factor + num_mi_w - 1) / num_mi_w;
+      (width + num_mi_w - 1) / num_mi_w;
   const int num_rows =
-      (mi_params->mi_rows / resize_factor + num_mi_h - 1) / num_mi_h;
-  const int block_w = num_mi_w << 2;
-  const int block_h = num_mi_h << 2;
+      (height + num_mi_h - 1) / num_mi_h;
+  const int block_w = num_mi_w >> 1;
+  const int block_h = num_mi_h >> 1;
   double log_sum = 0.0;
   double blk_count = 0.0;
 
@@ -132,11 +143,12 @@ static void set_mb_butteraugli_rdmult_scaling(AV1_COMP *cpi,
 void av1_set_butteraugli_rdmult(const AV1_COMP *cpi, MACROBLOCK *x,
                                 BLOCK_SIZE bsize, int mi_row, int mi_col,
                                 int *rdmult) {
-  assert(cpi->oxcf.tune_cfg.tuning == AOM_TUNE_BUTTERAUGLI);
+  assert(cpi->oxcf.tune_cfg.tuning == AOM_TUNE_BUTTERAUGLI || cpi->oxcf.tune_cfg.tuning == AOM_TUNE_LAVISH);
   if (!cpi->butteraugli_info.recon_set) {
     return;
   }
   const AV1_COMMON *const cm = &cpi->common;
+  const BLOCK_SIZE butteraugli_rdo_bsize = BLOCK_8X8;
 
   const int num_mi_w = mi_size_wide[butteraugli_rdo_bsize];
   const int num_mi_h = mi_size_high[butteraugli_rdo_bsize];
@@ -157,7 +169,7 @@ void av1_set_butteraugli_rdmult(const AV1_COMP *cpi, MACROBLOCK *x,
       num_of_mi += 1.0;
     }
   }
-  geom_mean_of_scale = exp(geom_mean_of_scale / num_of_mi);
+  geom_mean_of_scale = exp((geom_mean_of_scale * cpi->oxcf.butteraugli_rd_mult / 100.0) / num_of_mi);
 
   *rdmult = (int)((double)(*rdmult) * geom_mean_of_scale + 0.5);
   *rdmult = AOMMAX(*rdmult, 0);
@@ -201,11 +213,19 @@ static void zero_img(YV12_BUFFER_CONFIG *dst) {
 void av1_setup_butteraugli_source(AV1_COMP *cpi) {
   YV12_BUFFER_CONFIG *const dst = &cpi->butteraugli_info.source;
   AV1_COMMON *const cm = &cpi->common;
-  const int width = cpi->source->y_crop_width;
-  const int height = cpi->source->y_crop_height;
+  const int width = cpi->source->y_width;
+  const int height = cpi->source->y_height;
   const int bit_depth = cpi->td.mb.e_mbd.bd;
   const int ss_x = cpi->source->subsampling_x;
   const int ss_y = cpi->source->subsampling_y;
+  /*int resize_factor; // Scale factor by user-determined value from --butteraugli-resize-factor
+  if (cpi->oxcf.butteraugli_intensity_target > 1) {
+    resize_factor = 4;
+  } else if (cpi->oxcf.butteraugli_intensity_target > 0) {
+    resize_factor = 2;
+  } else {
+    resize_factor = 1;
+  }*/
   if (dst->buffer_alloc_sz == 0) {
     aom_alloc_frame_buffer(
         dst, width, height, ss_x, ss_y, cm->seq_params->use_highbitdepth,
@@ -224,18 +244,22 @@ void av1_setup_butteraugli_source(AV1_COMP *cpi) {
           cpi->source, resized_dst, bit_depth, av1_num_planes(cm))) {
     aom_internal_error(cm->error, AOM_CODEC_MEM_ERROR,
                        "Error allocating buffers during resize");
+  if (cm->seq_params->use_highbitdepth) {
+    zero_img_highbd(cpi->source);
+    copy_img_highbd(resized_dst, cpi->source, width / resize_factor,
+            height / resize_factor);
+  } else {
+    zero_img_lowbd(cpi->source);
+    copy_img_lowbd(resized_dst, cpi->source, width / resize_factor,
+            height / resize_factor);
   }
-
-  zero_img(cpi->source);
-  copy_img(resized_dst, cpi->source, width / resize_factor,
-           height / resize_factor);
 }
 
 void av1_setup_butteraugli_rdmult_and_restore_source(AV1_COMP *cpi, double K) {
   av1_copy_and_extend_frame(&cpi->butteraugli_info.source, cpi->source);
   AV1_COMMON *const cm = &cpi->common;
-  const int width = cpi->source->y_crop_width;
-  const int height = cpi->source->y_crop_height;
+  const int width = cpi->source->y_width;
+  const int height = cpi->source->y_height;
   const int ss_x = cpi->source->subsampling_x;
   const int ss_y = cpi->source->subsampling_y;
 
@@ -244,9 +268,15 @@ void av1_setup_butteraugli_rdmult_and_restore_source(AV1_COMP *cpi, double K) {
   aom_alloc_frame_buffer(
       &resized_recon, width / resize_factor, height / resize_factor, ss_x, ss_y,
       cm->seq_params->use_highbitdepth, cpi->oxcf.border_in_pixels,
-      cm->features.byte_alignment, 0, 0);
-  copy_img(&cpi->common.cur_frame->buf, &resized_recon, width / resize_factor,
-           height / resize_factor);
+      cm->features.byte_alignment, 0);
+
+  if (cm->seq_params->use_highbitdepth) {
+    copy_img_highbd(&cpi->common.cur_frame->buf, &resized_recon, width / resize_factor,
+            height / resize_factor);
+  } else {
+    copy_img_lowbd(&cpi->common.cur_frame->buf, &resized_recon, width / resize_factor,
+            height / resize_factor);
+  }
 
   set_mb_butteraugli_rdmult_scaling(cpi, &cpi->butteraugli_info.resized_source,
                                     &resized_recon, K);
@@ -306,8 +336,11 @@ void av1_setup_butteraugli_rdmult(AV1_COMP *cpi) {
 
   av1_set_variance_partition_thresholds(cpi, q_index, 0);
   av1_encode_frame(cpi);
-
-  av1_setup_butteraugli_rdmult_and_restore_source(cpi, 0.3);
+  if (cpi->oxcf.tune_cfg.tuning == AOM_TUNE_LAVISH) {
+    av1_setup_butteraugli_rdmult_and_restore_source(cpi, 0.6);
+  } else {
+    av1_setup_butteraugli_rdmult_and_restore_source(cpi, 0.3);
+  }
   cpi->sf.part_sf.partition_search_type = partition_search_type;
   cpi->sf.part_sf.fixed_partition_size = fixed_partition_size;
 }

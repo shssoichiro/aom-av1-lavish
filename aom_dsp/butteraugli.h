@@ -18,6 +18,6 @@
 int aom_calc_butteraugli(const YV12_BUFFER_CONFIG *source,
                          const YV12_BUFFER_CONFIG *distorted, int bit_depth,
                          aom_matrix_coefficients_t matrix_coefficients,
-                         aom_color_range_t color_range, float *dist_map);
+                         aom_color_range_t color_range, float *dist_map, int target_intensity, int hf_asymmetry);
 
 #endif  // AOM_AOM_DSP_BUTTERAUGLI_H_

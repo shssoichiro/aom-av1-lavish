@@ -19,7 +19,7 @@
 int aom_calc_butteraugli(const YV12_BUFFER_CONFIG *source,
                          const YV12_BUFFER_CONFIG *distorted, int bit_depth,
                          aom_matrix_coefficients_t matrix_coefficients,
-                         aom_color_range_t color_range, float *dist_map) {
+                         aom_color_range_t color_range, float *dist_map, int target_intensity, int hf_asymmetry) {
   (void)bit_depth;
   assert(bit_depth == 8);
   const int width = source->y_crop_width;
@@ -75,10 +75,13 @@ int aom_calc_butteraugli(const YV12_BUFFER_CONFIG *source,
     aom_free(distorted_argb);
     return 0;
   }
-
+  float hf_asym_val = (float)hf_asymmetry / 10.0f;
   JxlPixelFormat pixel_format = { 4, JXL_TYPE_UINT8, JXL_NATIVE_ENDIAN, 0 };
   JxlButteraugliApi *api = JxlButteraugliApiCreate(NULL);
-  JxlButteraugliApiSetHFAsymmetry(api, 0.8f);
+  JxlParallelRunner runner = JxlThreadParallelRunnerCreate(NULL, 6);
+  JxlButteraugliApiSetParallelRunner(api, JxlThreadParallelRunner, runner);
+  JxlButteraugliApiSetHFAsymmetry(api, hf_asym_val);
+  JxlButteraugliApiSetIntensityTarget(api, (float)target_intensity);
 
   JxlButteraugliResult *result = JxlButteraugliCompute(
       api, width, height, &pixel_format, src_argb, buffer_size, &pixel_format,

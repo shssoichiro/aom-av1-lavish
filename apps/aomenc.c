@@ -242,6 +242,28 @@ static const int av1_arg_ctrl_map[] = { AOME_SET_CPUUSED,
                                         AV1E_SET_AUTO_INTRA_TOOLS_OFF,
                                         AV1E_ENABLE_RATE_GUIDE_DELTAQ,
                                         AV1E_SET_RATE_DISTRIBUTION_INFO,
+                                        AOME_SET_DQ_MODULATE,
+                                        AOME_SET_DELTA_QINDEX_MULT,
+                                        AOME_SET_DELTA_QINDEX_MULT_POS,
+                                        AOME_SET_DELTA_QINDEX_MULT_NEG,
+                                        AOME_SET_VMAF_MOTION_MULT,
+                                        AOME_SET_SSIM_RD_MULT,
+                                        AOME_SET_LUMA_BIAS,
+                                        AV1E_SET_CHROMA_Q_OFFSET_U,
+                                        AV1E_SET_CHROMA_Q_OFFSET_V,
+                                        AOME_SET_VMAF_PREPROCESSING,
+#if CONFIG_TUNE_BUTTERAUGLI
+                                        //AOME_SET_BUTTERAUGLI_RDO_BSIZE,
+                                        AOME_SET_BUTTERAUGLI_INTENSITY_TARGET,
+                                        AOME_SET_BUTTERAUGLI_HF_ASYMMETRY,
+                                        AOME_SET_BUTTERAUGLI_RD_MULT,
+#endif
+                                        AOME_SET_LOOPFILTER_SHARPNESS,
+                                        AOME_SET_ENABLE_EXPERIMENTAL_PSY,
+#if CONFIG_TUNE_VMAF
+                                        AOME_SET_VMAF_RESIZE_FACTOR,
+                                        AOME_SET_VMAF_RD_MULT,
+#endif
                                         0 };
 
 const arg_def_t *main_args[] = { &g_av1_codec_arg_defs.help,
@@ -448,6 +470,28 @@ const arg_def_t *av1_ctrl_args[] = {
   &g_av1_codec_arg_defs.enable_tx_size_search,
   &g_av1_codec_arg_defs.loopfilter_control,
   &g_av1_codec_arg_defs.auto_intra_tools_off,
+  &g_av1_codec_arg_defs.dq_modulate,
+  &g_av1_codec_arg_defs.delta_qindex_mult,
+  &g_av1_codec_arg_defs.delta_qindex_mult_pos,
+  &g_av1_codec_arg_defs.delta_qindex_mult_neg,
+  &g_av1_codec_arg_defs.vmaf_motion_mult,
+  &g_av1_codec_arg_defs.ssim_rd_mult,
+  &g_av1_codec_arg_defs.luma_bias,
+  &g_av1_codec_arg_defs.chroma_q_offset_u,
+  &g_av1_codec_arg_defs.chroma_q_offset_v,
+  &g_av1_codec_arg_defs.vmaf_preprocessing,
+#if CONFIG_TUNE_BUTTERAUGLI
+  //&g_av1_codec_arg_defs.butteraugli_rdo_bsize,
+  &g_av1_codec_arg_defs.butteraugli_intensity_target,
+  &g_av1_codec_arg_defs.butteraugli_hf_asymmetry,
+  &g_av1_codec_arg_defs.butteraugli_rd_mult,
+#endif
+  &g_av1_codec_arg_defs.loopfilter_sharpness,
+  &g_av1_codec_arg_defs.enable_experimental_psy,
+#if CONFIG_TUNE_VMAF
+  &g_av1_codec_arg_defs.vmaf_resize_factor,
+  &g_av1_codec_arg_defs.vmaf_rd_mult,
+#endif
   NULL,
 };
 

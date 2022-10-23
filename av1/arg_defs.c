@@ -50,10 +50,11 @@ static const struct arg_enum_list tuning_enum[] = {
   { "vmaf_saliency_map", AOM_TUNE_VMAF_SALIENCY_MAP },
   { "lavish", AOM_TUNE_LAVISH },
   { "lavish_fast", AOM_TUNE_LAVISH_FAST },
+  { "lavish_vmaf_rd", AOM_TUNE_LAVISH_VMAF_RD },
+  { "omni", AOM_TUNE_OMNI },
   { "ipq", AOM_TUNE_IMAGE_PERCEPTUAL_QUALITY },
   { "ipq_vmaf_psy", AOM_TUNE_IMAGE_PERCEPTUAL_QUALITY_VMAF_PSY_QP }, // Tunes at this point and after use VMAF Q Adjustment
   { "vmaf_psy_qp", AOM_TUNE_FAST_VMAF_PSY_QP },
-  { "omni", AOM_TUNE_OMNI },
   { NULL, 0 }
 };
 
@@ -704,5 +705,55 @@ const av1_codec_arg_definitions_t g_av1_codec_arg_defs = {
       ARG_DEF(NULL, "sb-qp-sweep", 1,
               "When set to 1, enable the superblock level qp sweep for a "
               "given lambda to minimize the rdcost."),
+  .dq_modulate = ARG_DEF(NULL, "dq-modulate", 1,
+                       "Changes deltaq-mode=2's perceptual modulation. Still WIP. "
+                       "(0..1), default is 1 (wavelet)"),
+  .delta_qindex_mult = ARG_DEF(NULL, "delta-qindex-mult", 1,
+                       "Sets the effectiveness of the TPL model. Still WIP.\n "
+                       "                                        (0..1000), default is 100 (stock aomenc behavior.)\n "
+                       "                                        Acts as a multiplier for the change in quantization due to deltaq. "),
+  .delta_qindex_mult_pos = ARG_DEF(NULL, "delta-qindex-pos", 1,
+                       "Multiplier for positive deltaq quantization "
+                                  "(Advanced control, defaults to -1 (Disabled))"),
+  .delta_qindex_mult_neg = ARG_DEF(NULL, "delta-qindex-neg", 1,
+                       "Multiplier for negative deltaq quantization "
+                                  "(Advanced control, defaults to -1 (Disabled))"),
+  .vmaf_motion_mult = ARG_DEF(NULL, "vmaf-motion-mult", 1,
+                       "Multiplier for vmaf qindex "
+                                  "(Advanced users only, only active with vmaf tunes, defaults to 100)"),
+  .ssim_rd_mult = ARG_DEF(NULL, "ssim-rd-mult", 1,
+                       "Multiplier for SSIM rdmult "
+                                  "(Advanced users only, only active with ipq and ssim tunes, defaults to 100)"),
+  .luma_bias = ARG_DEF(NULL, "luma-bias", 1,
+                       "Apply a bias to low luma blocks "
+                                  "(Recommended to leave default (-5..(1)..5)"),
+  .chroma_q_offset_u = ARG_DEF(NULL, "chroma-q-offset-u", 1,
+                       "Adjust the automatic chroma Q offset for the u plane"),
+  .chroma_q_offset_v = ARG_DEF(NULL, "chroma-q-offset-v", 1,
+                       "Adjust the automatic chroma Q offset for the v plane"),
+  .vmaf_preprocessing = ARG_DEF(NULL, "vmaf-preprocessing", 1,
+                       "Force instance of VMAF preprocessing ((0)..3)\n "
+                       "                                        0 - Off, 1 - VMAF Neg, 2 - VMAF Block-based, 3 - VMAF Frame-based"),
+#if CONFIG_TUNE_BUTTERAUGLI
+  .butteraugli_intensity_target = ARG_DEF(NULL, "butteraugli-intensity-target", 1,
+                       "Target display brightness in nits (Default 100)"),
+  .butteraugli_hf_asymmetry = ARG_DEF(NULL, "butteraugli-hf-asymmetry", 1,
+                       "Sets the hf-asymmetry param for Butteraugli (Default is (5), which is 0.5 in the API)"),
+  .butteraugli_rd_mult = ARG_DEF(NULL, "butteraugli-rd-mult", 1,
+                       "Multiplier for butteraugli tunes rdmult "
+                                  "(Advanced users only, only active with tunes that utilize butteraugli rdo, defaults to 100)"),
+#endif
+  .loopfilter_sharpness = ARG_DEF(NULL, "loopfilter-sharpness", 1,
+                       "Adjust sharpness for the loopfilter, can reduce detail blur at the expense of artifacts. ((0)..7)"),
+  .enable_experimental_psy = ARG_DEF(NULL, "enable-experimental-psy", 1,
+                       "Enable experimental psy changes (Current: VP9 Film modifications). May hurt quality. ((0)..1)"),
+#if CONFIG_TUNE_VMAF
+  .vmaf_resize_factor = ARG_DEF(NULL, "vmaf-resize-factor", 1,
+                       "Change internal resizing for faster calculations with vmaf tunes\n "
+                       "                                        0 - Resize to half (Default), 1 - Resize to a quarter."),
+  .vmaf_rd_mult = ARG_DEF(NULL, "vmaf-rd-mult", 1,
+                       "Multiplier for vmaf tunes rdmult "
+                                  "(Advanced users only, only active with tunes that utilize vmaf rdo, defaults to 100)"),
+#endif
 #endif  // CONFIG_AV1_ENCODER
 };

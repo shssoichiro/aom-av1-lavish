@@ -61,7 +61,7 @@ void av1_set_ssim_rdmult(const AV1_COMP *const cpi, int *errorperbit,
       num_of_mi += 1.0;
     }
   }
-  geom_mean_of_scale = pow(geom_mean_of_scale, (1.0 / num_of_mi));
+  geom_mean_of_scale = pow(geom_mean_of_scale * cpi->oxcf.ssim_rd_mult / 100.0, (1.0 / num_of_mi));
 
   *rdmult = (int)((double)(*rdmult) * geom_mean_of_scale + 0.5);
   *rdmult = AOMMAX(*rdmult, 0);

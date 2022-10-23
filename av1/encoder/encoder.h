@@ -1088,6 +1088,39 @@ typedef struct AV1EncoderConfig {
 
   // A flag to control if we enable the superblock qp sweep for a given lambda
   int sb_qp_sweep;
+  
+  int delta_qindex_mult_neg;
+
+  int vmaf_motion_mult;
+
+  int ssim_rd_mult;
+
+  int luma_bias;
+
+  int vmaf_preprocessing;
+
+  bool override_preprocessing;
+#if CONFIG_TUNE_BUTTERAUGLI
+  //BLOCK_SIZE butteraugli_rdo_bsize;
+
+  int butteraugli_intensity_target;
+
+  int butteraugli_hf_asymmetry;
+
+  int butteraugli_rd_mult;
+#endif
+
+  int loopfilter_sharpness;
+
+  bool enable_experimental_psy;
+
+#if CONFIG_TUNE_VMAF
+  BLOCK_SIZE vmaf_rdo_bsize;
+
+  int vmaf_resize_factor;
+
+  int vmaf_rd_mult;
+#endif
   /*!\endcond */
 } AV1EncoderConfig;
 
