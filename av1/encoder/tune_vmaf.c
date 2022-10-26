@@ -609,8 +609,11 @@ void av1_set_mb_vmaf_rdmult_scaling(AV1_COMP *cpi) {
   AV1_COMMON *cm = &cpi->common;
   const int y_width = cpi->source->y_width;
   const int y_height = cpi->source->y_height;
-  const int resized_block_size = BLOCK_32X32;
-  const int resize_factor = 2;
+  const int resized_block_size = cpi->oxcf.vmaf_rdo_bsize;
+  int resize_factor = 2;
+  if (cpi->oxcf.vmaf_resize_factor == 1) {
+    resize_factor = 4;
+  }
   const int bit_depth = cpi->td.mb.e_mbd.bd;
   const int ss_x = cpi->source->subsampling_x;
   const int ss_y = cpi->source->subsampling_y;
@@ -762,7 +765,7 @@ void av1_set_vmaf_rdmult(const AV1_COMP *const cpi, MACROBLOCK *const x,
       num_of_mi += 1.0;
     }
   }
-  geom_mean_of_scale = exp(geom_mean_of_scale / num_of_mi);
+  geom_mean_of_scale = exp((geom_mean_of_scale * cpi->oxcf.vmaf_rd_mult / 100.0) / num_of_mi);
 
   *rdmult = (int)((double)(*rdmult) * geom_mean_of_scale + 0.5);
   *rdmult = AOMMAX(*rdmult, 0);

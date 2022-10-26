@@ -1088,9 +1088,11 @@ typedef struct AV1EncoderConfig {
 
   bool override_preprocessing;
 #if CONFIG_TUNE_BUTTERAUGLI
-  BLOCK_SIZE butteraugli_rdo_bsize;
+  //BLOCK_SIZE butteraugli_rdo_bsize;
 
-  int butteraugli_resize_factor;
+  int butteraugli_intensity_target;
+
+  int butteraugli_hf_asymmetry;
 
   int butteraugli_rd_mult;
 #endif
@@ -1098,6 +1100,14 @@ typedef struct AV1EncoderConfig {
   int loopfilter_sharpness;
 
   bool enable_experimental_psy;
+
+#if CONFIG_TUNE_VMAF
+  BLOCK_SIZE vmaf_rdo_bsize;
+
+  int vmaf_resize_factor;
+
+  int vmaf_rd_mult;
+#endif
   /*!\endcond */
 } AV1EncoderConfig;
 

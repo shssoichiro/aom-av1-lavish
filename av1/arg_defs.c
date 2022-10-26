@@ -720,11 +720,12 @@ const av1_codec_arg_definitions_t g_av1_codec_arg_defs = {
                        "Adjust the automatic chroma Q offset for the v plane"),
   .vmaf_preprocessing = ARG_DEF(NULL, "vmaf-preprocessing", 1,
                        "Force instance of VMAF preprocessing ((0)..3)\n "
-                       "                                        0 - Off, 1 - VMAF Neg, 2 - VMAF Block-based, 3 - VMAF Frame-based."),
+                       "                                        0 - Off, 1 - VMAF Neg, 2 - VMAF Block-based, 3 - VMAF Frame-based"),
 #if CONFIG_TUNE_BUTTERAUGLI
-  .butteraugli_resize_factor = ARG_DEF(NULL, "butteraugli-resize-factor", 1,
-                       "Change internal resizing for faster calculations with butteraugli tunes\n "
-                       "                                        0 - No internal resizing, 1 - Resize to half (Default), 2 - Resize to a quarter."),
+  .butteraugli_intensity_target = ARG_DEF(NULL, "butteraugli-intensity-target", 1,
+                       "Target display brightness in nits (Default 100)"),
+  .butteraugli_hf_asymmetry = ARG_DEF(NULL, "butteraugli-hf-asymmetry", 1,
+                       "Sets the hf-asymmetry param for Butteraugli (Default is (5), which is 0.5 in the API)"),
   .butteraugli_rd_mult = ARG_DEF(NULL, "butteraugli-rd-mult", 1,
                        "Multiplier for butteraugli tunes rdmult "
                                   "(Advanced users only, only active with tunes that utilize butteraugli rdo, defaults to 100)"),
@@ -733,5 +734,13 @@ const av1_codec_arg_definitions_t g_av1_codec_arg_defs = {
                        "Adjust sharpness for the loopfilter, can reduce detail blur at the expense of artifacts. ((0)..7)"),
   .enable_experimental_psy = ARG_DEF(NULL, "enable-experimental-psy", 1,
                        "Enable experimental psy changes (Current: VP9 Film modifications). May hurt quality. ((0)..1)"),
+#if CONFIG_TUNE_VMAF
+  .vmaf_resize_factor = ARG_DEF(NULL, "vmaf-resize-factor", 1,
+                       "Change internal resizing for faster calculations with vmaf tunes\n "
+                       "                                        0 - Resize to half (Default), 1 - Resize to a quarter."),
+  .vmaf_rd_mult = ARG_DEF(NULL, "vmaf-rd-mult", 1,
+                       "Multiplier for vmaf tunes rdmult "
+                                  "(Advanced users only, only active with tunes that utilize vmaf rdo, defaults to 100)"),
+#endif
 #endif  // CONFIG_AV1_ENCODER
 };

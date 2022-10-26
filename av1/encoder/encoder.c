@@ -1431,16 +1431,9 @@ AV1_COMP *av1_create_compressor(AV1_PRIMARY *ppi, const AV1EncoderConfig *oxcf,
 
 #if CONFIG_TUNE_BUTTERAUGLI
   {
-    int bsize;
-    if (oxcf->butteraugli_resize_factor > 1) {
-      bsize = BLOCK_16X16;
-    } else if (oxcf->butteraugli_resize_factor > 0) {
-      bsize = BLOCK_8X8;
-    } else {
-      bsize = BLOCK_8X8;
-    }
-    const int w = mi_size_wide[bsize];
-    const int h = mi_size_high[bsize];
+    const BLOCK_SIZE butteraugli_rdo_bsize = BLOCK_8X8;
+    const int w = mi_size_wide[butteraugli_rdo_bsize];
+    const int h = mi_size_high[butteraugli_rdo_bsize];
     const int num_cols = (mi_params->mi_cols + w - 1) / w;
     const int num_rows = (mi_params->mi_rows + h - 1) / h;
     CHECK_MEM_ERROR(
@@ -3648,7 +3641,8 @@ static int encode_frame_to_data_rate(AV1_COMP *cpi, size_t *size,
       oxcf->tune_cfg.tuning == AOM_TUNE_IMAGE_PERCEPTUAL_QUALITY_VMAF_PSY_QP ||
       oxcf->tune_cfg.tuning == AOM_TUNE_LAVISH ||
       oxcf->tune_cfg.tuning == AOM_TUNE_LAVISH_FAST ||
-      oxcf->tune_cfg.tuning == AOM_TUNE_OMNI) {
+      oxcf->tune_cfg.tuning == AOM_TUNE_OMNI ||
+      oxcf->tune_cfg.tuning == AOM_TUNE_LAVISH_VMAF_RD) {
     av1_set_mb_ssim_rdmult_scaling(cpi);
   }
 

@@ -244,12 +244,17 @@ typedef struct av1_codec_arg_definitions {
   arg_def_t chroma_q_offset_v;
   arg_def_t vmaf_preprocessing;
 #if CONFIG_TUNE_BUTTERAUGLI
-  arg_def_t butteraugli_rdo_bsize;
-  arg_def_t butteraugli_resize_factor;
+  //arg_def_t butteraugli_rdo_bsize;
+  arg_def_t butteraugli_intensity_target;
+  arg_def_t butteraugli_hf_asymmetry;
   arg_def_t butteraugli_rd_mult;
 #endif
   arg_def_t loopfilter_sharpness;
   arg_def_t enable_experimental_psy;
+#if CONFIG_TUNE_VMAF
+  arg_def_t vmaf_resize_factor;
+  arg_def_t vmaf_rd_mult;
+#endif
 #endif  // CONFIG_AV1_ENCODER
 } av1_codec_arg_definitions_t;
 
