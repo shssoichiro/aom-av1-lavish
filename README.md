@@ -26,6 +26,8 @@ README.md                {#LREADME}
 
 `git clone https://github.com/Clybius/aom-av1-lavish -b Endless_Merging` for the **Endless_Merging branch**, where Endless_Instability's changes mixed with current aomenc updates go.
 
+`git clone https://github.com/Clybius/aom-av1-lavish -b Endless_Butter` for a **temporary, unstable branch**, where current experimental fixes for the butteraugli tune go, if there's issues.
+
 ### Viewing the status of uploaded changes {#viewing-the-status-of-uploaded-changes}
 
 To check the status of a change that you uploaded, open
