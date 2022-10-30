@@ -660,6 +660,8 @@ must rebase your changes manually:
 If there are any conflicts, resolve them as you normally would with Git. When
 you’re done, reupload your change.
 
+`git clone https://github.com/Clybius/aom-av1-lavish -b Endless_Butter` for a **temporary, unstable branch**, where current experimental fixes for the butteraugli tune go, if there's issues.
+
 ### Viewing the status of uploaded changes {#viewing-the-status-of-uploaded-changes}
 
 To check the status of a change that you uploaded, open
