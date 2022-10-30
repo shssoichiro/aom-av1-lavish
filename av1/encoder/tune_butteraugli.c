@@ -205,7 +205,7 @@ void av1_set_butteraugli_rdmult(const AV1_COMP *cpi, MACROBLOCK *x,
     return;
   }
   const AV1_COMMON *const cm = &cpi->common;
-  const BLOCK_SIZE butteraugli_rdo_bsize = BLOCK_16X16;
+  const BLOCK_SIZE butteraugli_rdo_bsize = BLOCK_8X8;
 
   const int num_mi_w = mi_size_wide[butteraugli_rdo_bsize];
   const int num_mi_h = mi_size_high[butteraugli_rdo_bsize];

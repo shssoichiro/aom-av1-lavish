@@ -925,8 +925,8 @@ static aom_codec_err_t validate_config(aom_codec_alg_priv_t *ctx,
   RANGE_CHECK(extra_cfg, chroma_q_offset_v, -63, 63);
   RANGE_CHECK(extra_cfg, vmaf_preprocessing, 0, 3);
 #if CONFIG_TUNE_BUTTERAUGLI
-  RANGE_CHECK(extra_cfg, butteraugli_intensity_target, 0, 1000);
-  RANGE_CHECK(extra_cfg, butteraugli_hf_asymmetry, 0, 50);
+  RANGE_CHECK(extra_cfg, butteraugli_intensity_target, 0, 2000);
+  RANGE_CHECK(extra_cfg, butteraugli_hf_asymmetry, 0, 100);
   RANGE_CHECK(extra_cfg, butteraugli_rd_mult, 1, 1000);
 #endif
 #if CONFIG_TUNE_VMAF

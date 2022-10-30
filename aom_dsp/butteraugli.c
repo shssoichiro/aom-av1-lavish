@@ -111,7 +111,7 @@ int aom_calc_butteraugli(const YV12_BUFFER_CONFIG *source,
     aom_free(distorted_argb);
     return 0;
   }
-
+  float hf_asym_val = (float)hf_asymmetry / 10.0f;
   JxlPixelFormat pixel_format = { 4, JXL_TYPE_UINT8, JXL_NATIVE_ENDIAN, 0 };
   if (bit_depth == 10) {
     pixel_format.data_type = JXL_TYPE_UINT16;
@@ -119,7 +119,7 @@ int aom_calc_butteraugli(const YV12_BUFFER_CONFIG *source,
   JxlButteraugliApi *api = JxlButteraugliApiCreate(NULL);
   JxlParallelRunner runner = JxlThreadParallelRunnerCreate(NULL, 6);
   JxlButteraugliApiSetParallelRunner(api, JxlThreadParallelRunner, runner);
-  JxlButteraugliApiSetHFAsymmetry(api, (float)(hf_asymmetry / 10));
+  JxlButteraugliApiSetHFAsymmetry(api, hf_asym_val);
   JxlButteraugliApiSetIntensityTarget(api, (float)target_intensity);
 
   JxlButteraugliResult *result = JxlButteraugliCompute(
