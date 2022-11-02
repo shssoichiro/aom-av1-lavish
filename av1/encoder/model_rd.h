@@ -136,7 +136,7 @@ static AOM_INLINE void model_rd_with_curvfit(const AV1_COMP *const cpi,
   const double xqr = log2(sse_norm / qstepsqr);
   double rate_f, dist_by_sse_norm_f;
   av1_model_rd_curvfit(plane_bsize, sse_norm, xqr, &rate_f,
-                       &dist_by_sse_norm_f);
+                       &dist_by_sse_norm_f, cpi);
 
   const double dist_f = dist_by_sse_norm_f * sse_norm;
   int rate_i = (int)(AOMMAX(0.0, rate_f * num_samples) + 0.5);

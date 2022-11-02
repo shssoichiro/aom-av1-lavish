@@ -620,24 +620,33 @@ static void setup_block_rdmult(const AV1_COMP *const cpi, MACROBLOCK *const x,
       cpi->oxcf.tune_cfg.tuning == AOM_TUNE_VMAF_NEG_MAX_GAIN) {
     av1_set_vmaf_rdmult(cpi, x, bsize, mi_row, mi_col, &x->rdmult);
   }
-  if (cpi->oxcf.tune_cfg.tuning == AOM_TUNE_OMNI) { // Experimenting with av1_set_error_per_bit
-    int ssim_rdmult = x->rdmult;
-    int error_per_bit = x->errorperbit;
-    av1_set_ssim_rdmult(cpi, &error_per_bit, bsize, mi_row, mi_col,
-                        &ssim_rdmult);
-
-    x->rdmult = (int) (((int64_t)(ssim_rdmult * 2.5) + (int64_t)(x->rdmult)) / 3.5);
-    //////error_per_bit = (int) (((int64_t)(error_per_bit * 2.5) + (int64_t)(x->errorperbit)) / 3.5);
-    //////av1_set_error_per_bit(&x->errorperbit, ssim_rdmult);
-    x->errorperbit = (int) (((int64_t)(error_per_bit * 2.5) + (int64_t)(x->errorperbit)) / 3.5);
-  }
 #endif
+  if (cpi->oxcf.tune_cfg.tuning == AOM_TUNE_OMNI) { // Switches and mixes chosen rdmult based on which (ssim/default) has a lower value,
+    int omni_rdmult = x->rdmult;                    // intended for high fidelity
+    int omni_errorperbit = x->errorperbit;
+    av1_set_ssim_rdmult(cpi, &x->errorperbit, bsize, mi_row, mi_col,
+                        &x->rdmult);
+    int ssim_rdmult = x->rdmult;
+    int ssim_errorperbit = x->errorperbit;
+    if (ssim_rdmult < omni_rdmult) {
+      omni_rdmult = (int) (((int64_t)(ssim_rdmult * 2.5) + (int64_t)(omni_rdmult)) / 3.5);
+    } else {
+      omni_rdmult = (int) (((int64_t)(ssim_rdmult) + (int64_t)(omni_rdmult * 2.5)) / 3.5);
+    }
+
+    if (ssim_errorperbit < omni_errorperbit) {
+      omni_errorperbit = (int) (((int64_t)(ssim_errorperbit * 2.5) + (int64_t)(omni_errorperbit)) / 3.5);
+    } else {
+      omni_errorperbit = (int) (((int64_t)(ssim_errorperbit) + (int64_t)(omni_errorperbit * 2.5)) / 3.5);
+    }
+    x->rdmult = omni_rdmult;
+    x->errorperbit = omni_errorperbit;
+  }
 #if CONFIG_TUNE_BUTTERAUGLI
   if (cpi->oxcf.tune_cfg.tuning == AOM_TUNE_BUTTERAUGLI) {
     av1_set_butteraugli_rdmult(cpi, x, bsize, mi_row, mi_col, &x->rdmult);
   }
 
-#if CONFIG_TUNE_VMAF
   if (cpi->oxcf.tune_cfg.tuning == AOM_TUNE_LAVISH) {
     MACROBLOCK *butteraugli_x = x;
     MACROBLOCK *ssim_x = x;
@@ -648,7 +657,6 @@ static void setup_block_rdmult(const AV1_COMP *const cpi, MACROBLOCK *const x,
     x->rdmult = lavish_rdmult;
     av1_set_error_per_bit(&x->errorperbit, lavish_rdmult);
   }
-#endif
 #endif
 #if CONFIG_TUNE_VMAF
   if (cpi->oxcf.tune_cfg.tuning == AOM_TUNE_LAVISH_VMAF_RD) {

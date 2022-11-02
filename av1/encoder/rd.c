@@ -1120,7 +1120,7 @@ static const double interp_dgrid_curv[3][65] = {
 };
 
 void av1_model_rd_curvfit(BLOCK_SIZE bsize, double sse_norm, double xqr,
-                          double *rate_f, double *distbysse_f) {
+                          double *rate_f, double *distbysse_f, const AV1_COMP *cpi) {
   const double x_start = -15.5;
   const double x_end = 16.5;
   const double x_step = 0.5;
@@ -1129,6 +1129,9 @@ void av1_model_rd_curvfit(BLOCK_SIZE bsize, double sse_norm, double xqr,
   const int dcat = sse_norm_curvfit_model_cat_lookup(sse_norm);
   (void)x_end;
 
+  if (cpi->oxcf.tune_cfg.tuning == AOM_TUNE_OMNI) { // Wizard shit, thanks Opmox
+    xqr /= 6.f;
+  }
   xqr = AOMMAX(xqr, x_start + x_step + epsilon);
   xqr = AOMMIN(xqr, x_end - x_step - epsilon);
   const double x = (xqr - x_start) / x_step;

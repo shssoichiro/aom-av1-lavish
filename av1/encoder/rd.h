@@ -238,7 +238,7 @@ void av1_model_rd_from_var_lapndz(int64_t var, unsigned int n,
                                   unsigned int qstep, int *rate, int64_t *dist);
 
 void av1_model_rd_curvfit(BLOCK_SIZE bsize, double sse_norm, double xqr,
-                          double *rate_f, double *distbysse_f);
+                          double *rate_f, double *distbysse_f, const struct AV1_COMP *cpi);
 void av1_model_rd_surffit(BLOCK_SIZE bsize, double sse_norm, double xm,
                           double yl, double *rate_f, double *distbysse_f);
 
