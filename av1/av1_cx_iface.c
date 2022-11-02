@@ -200,6 +200,7 @@ struct av1_extracfg {
   int ssim_rd_mult;
   int luma_bias;
   int vmaf_preprocessing;
+  int vmaf_quantization;
   int butteraugli_intensity_target;
   int butteraugli_hf_asymmetry;
   int butteraugli_rd_mult;
@@ -207,6 +208,7 @@ struct av1_extracfg {
   int enable_experimental_psy;
   int vmaf_resize_factor;
   int vmaf_rd_mult;
+  int tpl_rd_mult;
 };
 
 #if CONFIG_REALTIME_ONLY
@@ -379,6 +381,7 @@ static const struct av1_extracfg default_extra_cfg = {
   100,             // ssim_rd_mult
   1,               // luma_bias
   0,               // vmaf_preprocessing
+  0,               // vmaf_quantization
   100,             // butteraugli_intensity_target
   5,               // butteraugli_hf_asymmetry
   100,             // butteraugli_rd_mult
@@ -386,6 +389,7 @@ static const struct av1_extracfg default_extra_cfg = {
   0,               // enable_experimental_psy
   0,               // vmaf_resize_factor
   100,             // vmaf_rd_mult
+  100,             // tpl_rd_mult
 };
 #else
 static const struct av1_extracfg default_extra_cfg = {
@@ -544,6 +548,7 @@ static const struct av1_extracfg default_extra_cfg = {
   100,             // ssim_rd_mult
   1,               // luma_bias
   0,               // vmaf_preprocessing
+  0,               // vmaf_quantization
   100,             // butteraugli_intensity_target
   5,               // butteraugli_hf_asymmetry
   100,             // butteraugli_rd_mult
@@ -551,6 +556,7 @@ static const struct av1_extracfg default_extra_cfg = {
   0,               // enable_experimental_psy
   0,               // vmaf_resize_factor
   100,             // vmaf_rd_mult
+  100,             // tpl_rd_mult
 };
 #endif
 
@@ -850,7 +856,8 @@ static aom_codec_err_t validate_config(aom_codec_alg_priv_t *ctx,
        extra_cfg->tuning <= AOM_TUNE_VMAF_NEG_MAX_GAIN) ||
        extra_cfg->tuning >= AOM_TUNE_IMAGE_PERCEPTUAL_QUALITY_VMAF_PSY_QP ||
        extra_cfg->tuning == AOM_TUNE_LAVISH_VMAF_RD ||
-       extra_cfg->vmaf_preprocessing >= 1) {
+       extra_cfg->vmaf_preprocessing >= 1 ||
+       extra_cfg->vmaf_quantization == 1) {
     ERROR(
         "This error may be related to the wrong configuration options: try to "
         "set -DCONFIG_TUNE_VMAF=1 at the time CMake is run.");
@@ -923,7 +930,9 @@ static aom_codec_err_t validate_config(aom_codec_alg_priv_t *ctx,
   RANGE_CHECK(extra_cfg, luma_bias, -5, 5);
   RANGE_CHECK(extra_cfg, chroma_q_offset_u, -63, 63);
   RANGE_CHECK(extra_cfg, chroma_q_offset_v, -63, 63);
+#if CONFIG_TUNE_VMAF
   RANGE_CHECK(extra_cfg, vmaf_preprocessing, 0, 3);
+#endif
 #if CONFIG_TUNE_BUTTERAUGLI
   RANGE_CHECK(extra_cfg, butteraugli_intensity_target, 0, 2000);
   RANGE_CHECK(extra_cfg, butteraugli_hf_asymmetry, 0, 100);
@@ -932,6 +941,8 @@ static aom_codec_err_t validate_config(aom_codec_alg_priv_t *ctx,
 #if CONFIG_TUNE_VMAF
   RANGE_CHECK(extra_cfg, vmaf_resize_factor, 0, 1);
   RANGE_CHECK(extra_cfg, vmaf_rd_mult, 1, 1000);
+  RANGE_CHECK(extra_cfg, tpl_rd_mult, 1, 1000);
+  RANGE_CHECK_BOOL(extra_cfg, vmaf_quantization);
 #endif
   RANGE_CHECK_HI(extra_cfg, loopfilter_sharpness, 7);
   RANGE_CHECK_BOOL(extra_cfg, enable_experimental_psy);
@@ -1528,11 +1539,13 @@ static aom_codec_err_t set_encoder_config(AV1EncoderConfig *oxcf,
   oxcf->ssim_rd_mult = extra_cfg->ssim_rd_mult;
 
   oxcf->luma_bias = extra_cfg->luma_bias;
-
+#if CONFIG_TUNE_VMAF
   oxcf->vmaf_preprocessing = extra_cfg->vmaf_preprocessing;
   if (oxcf->vmaf_preprocessing > 0) {
     oxcf->override_preprocessing = 1;
   }
+  oxcf->vmaf_quantization = extra_cfg->vmaf_quantization;
+#endif
 #if CONFIG_TUNE_BUTTERAUGLI
   oxcf->butteraugli_intensity_target = extra_cfg->butteraugli_intensity_target;
 
@@ -1565,6 +1578,7 @@ static aom_codec_err_t set_encoder_config(AV1EncoderConfig *oxcf,
   oxcf->vmaf_rd_mult = extra_cfg->vmaf_rd_mult;
 #endif
 
+  oxcf->tpl_rd_mult = extra_cfg->tpl_rd_mult;
   return AOM_CODEC_OK;
 }
 
@@ -2972,7 +2986,8 @@ static aom_codec_err_t encoder_encode(aom_codec_alg_priv_t *ctx,
        ctx->extra_cfg.tuning <= AOM_TUNE_VMAF_NEG_MAX_GAIN) ||
        ctx->extra_cfg.tuning >= AOM_TUNE_IMAGE_PERCEPTUAL_QUALITY_VMAF_PSY_QP ||
        ctx->extra_cfg.tuning == AOM_TUNE_LAVISH_VMAF_RD ||
-       ctx->extra_cfg.vmaf_preprocessing >= 1) {
+       ctx->extra_cfg.vmaf_preprocessing >= 1 ||
+       ctx->extra_cfg.vmaf_quantization == 1) {
     aom_init_vmaf_model(&ppi->cpi->vmaf_info.vmaf_model,
                         ppi->cpi->oxcf.tune_cfg.vmaf_model_path);
   }
@@ -4119,9 +4134,14 @@ static aom_codec_err_t encoder_set_option(aom_codec_alg_priv_t *ctx,
                               err_string)) {
     ctx->cfg.tile_width_count = arg_parse_list_helper(
         &arg, ctx->cfg.tile_widths, MAX_TILE_WIDTHS, err_string);
+#if CONFIG_TUNE_VMAF
   } else if (arg_match_helper(&arg, &g_av1_codec_arg_defs.vmaf_preprocessing,
                               argv, err_string)) {
     extra_cfg.vmaf_preprocessing = arg_parse_int_helper(&arg, err_string);
+  } else if (arg_match_helper(&arg, &g_av1_codec_arg_defs.vmaf_quantization,
+                              argv, err_string)) {
+    extra_cfg.vmaf_quantization = arg_parse_int_helper(&arg, err_string);
+#endif
 #if CONFIG_TUNE_BUTTERAUGLI
   } else if (arg_match_helper(&arg, &g_av1_codec_arg_defs.butteraugli_intensity_target,
                               argv, err_string)) {
@@ -4147,6 +4167,9 @@ static aom_codec_err_t encoder_set_option(aom_codec_alg_priv_t *ctx,
                               argv, err_string)) {
     extra_cfg.vmaf_rd_mult = arg_parse_int_helper(&arg, err_string);
 #endif
+  } else if (arg_match_helper(&arg, &g_av1_codec_arg_defs.tpl_rd_mult,
+                              argv, err_string)) {
+    extra_cfg.tpl_rd_mult = arg_parse_int_helper(&arg, err_string);
   } else if (arg_match_helper(&arg, &g_av1_codec_arg_defs.tile_height, argv,
                               err_string)) {
     ctx->cfg.tile_height_count = arg_parse_list_helper(
@@ -4262,6 +4285,13 @@ static aom_codec_err_t ctrl_set_vmaf_preprocessing(aom_codec_alg_priv_t *ctx,
   return update_extra_cfg(ctx, &extra_cfg);
 }
 
+static aom_codec_err_t ctrl_set_vmaf_quantization(aom_codec_alg_priv_t *ctx,
+                                          va_list args) {
+  struct av1_extracfg extra_cfg = ctx->extra_cfg;
+  extra_cfg.vmaf_quantization = CAST(AOME_SET_VMAF_QUANTIZATION, args);
+  return update_extra_cfg(ctx, &extra_cfg);
+}
+
 static aom_codec_err_t ctrl_set_butteraugli_intensity_target(aom_codec_alg_priv_t *ctx,
                                           va_list args) {
   struct av1_extracfg extra_cfg = ctx->extra_cfg;
@@ -4308,6 +4338,13 @@ static aom_codec_err_t ctrl_set_vmaf_rd_mult(aom_codec_alg_priv_t *ctx,
                                           va_list args) {
   struct av1_extracfg extra_cfg = ctx->extra_cfg;
   extra_cfg.vmaf_rd_mult = CAST(AOME_SET_VMAF_RD_MULT, args);
+  return update_extra_cfg(ctx, &extra_cfg);
+}
+
+static aom_codec_err_t ctrl_set_tpl_rd_mult(aom_codec_alg_priv_t *ctx,
+                                          va_list args) {
+  struct av1_extracfg extra_cfg = ctx->extra_cfg;
+  extra_cfg.tpl_rd_mult = CAST(AOME_SET_TPL_RD_MULT, args);
   return update_extra_cfg(ctx, &extra_cfg);
 }
 
@@ -4468,6 +4505,7 @@ static aom_codec_ctrl_fn_map_t encoder_ctrl_maps[] = {
   { AOME_SET_SSIM_RD_MULT, ctrl_set_ssim_rd_mult },
   { AOME_SET_LUMA_BIAS, ctrl_set_luma_bias },
   { AOME_SET_VMAF_PREPROCESSING, ctrl_set_vmaf_preprocessing },
+  { AOME_SET_VMAF_QUANTIZATION, ctrl_set_vmaf_quantization },
   { AOME_SET_BUTTERAUGLI_INTENSITY_TARGET, ctrl_set_butteraugli_intensity_target },
   { AOME_SET_BUTTERAUGLI_HF_ASYMMETRY, ctrl_set_butteraugli_hf_asymmetry },
   { AOME_SET_BUTTERAUGLI_RD_MULT, ctrl_set_butteraugli_rd_mult },
@@ -4475,6 +4513,7 @@ static aom_codec_ctrl_fn_map_t encoder_ctrl_maps[] = {
   { AOME_SET_ENABLE_EXPERIMENTAL_PSY, ctrl_set_enable_experimental_psy },
   { AOME_SET_VMAF_RESIZE_FACTOR, ctrl_set_vmaf_resize_factor },
   { AOME_SET_VMAF_RD_MULT, ctrl_set_vmaf_rd_mult },
+  { AOME_SET_TPL_RD_MULT, ctrl_set_tpl_rd_mult },
 
   // Getters
   { AOME_GET_LAST_QUANTIZER, ctrl_get_quantizer },

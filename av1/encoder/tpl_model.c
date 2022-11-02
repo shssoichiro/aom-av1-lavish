@@ -1832,7 +1832,7 @@ void av1_tpl_rdmult_setup(AV1_COMP *cpi) {
       }
       const double rk = intra_cost / mc_dep_cost;
       const int index = row * num_cols + col;
-      cpi->tpl_rdmult_scaling_factors[index] = rk / cpi->rd.r0 + c;
+      cpi->tpl_rdmult_scaling_factors[index] = ((rk / cpi->rd.r0) * cpi->oxcf.tpl_rd_mult / 100.0) + c;
     }
   }
 }

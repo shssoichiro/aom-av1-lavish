@@ -707,10 +707,10 @@ const av1_codec_arg_definitions_t g_av1_codec_arg_defs = {
                                   "(Advanced control, defaults to -1 (Disabled))"),
   .vmaf_motion_mult = ARG_DEF(NULL, "vmaf-motion-mult", 1,
                        "Multiplier for vmaf qindex "
-                                  "(Advanced users only, only active with vmaf tunes, defaults to 100)"),
+                                  "(Meant for hyper-tuning, only active with vmaf tunes, defaults to 100)"),
   .ssim_rd_mult = ARG_DEF(NULL, "ssim-rd-mult", 1,
                        "Multiplier for SSIM rdmult "
-                                  "(Advanced users only, only active with ipq and ssim tunes, defaults to 100)"),
+                                  "(Meant for hyper-tuning, only active with ipq and ssim tunes, defaults to 100)"),
   .luma_bias = ARG_DEF(NULL, "luma-bias", 1,
                        "Apply a bias to low luma blocks "
                                   "(Recommended to leave default (-5..(1)..5)"),
@@ -718,9 +718,14 @@ const av1_codec_arg_definitions_t g_av1_codec_arg_defs = {
                        "Adjust the automatic chroma Q offset for the u plane"),
   .chroma_q_offset_v = ARG_DEF(NULL, "chroma-q-offset-v", 1,
                        "Adjust the automatic chroma Q offset for the v plane"),
+#if CONFIG_TUNE_VMAF
   .vmaf_preprocessing = ARG_DEF(NULL, "vmaf-preprocessing", 1,
                        "Force instance of VMAF preprocessing ((0)..3)\n "
                        "                                        0 - Off, 1 - VMAF Neg, 2 - VMAF Block-based, 3 - VMAF Frame-based"),
+  .vmaf_quantization = ARG_DEF(NULL, "vmaf-quantization", 1,
+                       "Force instance of VMAF quantization ((0)..1)\n "
+                       "                                        0 - Off, 1 - On"),
+#endif
 #if CONFIG_TUNE_BUTTERAUGLI
   .butteraugli_intensity_target = ARG_DEF(NULL, "butteraugli-intensity-target", 1,
                        "Target display brightness in nits (Default 100)"),
@@ -728,7 +733,7 @@ const av1_codec_arg_definitions_t g_av1_codec_arg_defs = {
                        "Sets the hf-asymmetry param for Butteraugli (Default is (5), which is 0.5 in the API)"),
   .butteraugli_rd_mult = ARG_DEF(NULL, "butteraugli-rd-mult", 1,
                        "Multiplier for butteraugli tunes rdmult "
-                                  "(Advanced users only, only active with tunes that utilize butteraugli rdo, defaults to 100)"),
+                                  "(Meant for hyper-tuning, only active with tunes that utilize butteraugli rdo, defaults to 100)"),
 #endif
   .loopfilter_sharpness = ARG_DEF(NULL, "loopfilter-sharpness", 1,
                        "Adjust sharpness for the loopfilter, can reduce detail blur at the expense of artifacts. ((0)..7)"),
@@ -740,7 +745,10 @@ const av1_codec_arg_definitions_t g_av1_codec_arg_defs = {
                        "                                        0 - Resize to half (Default), 1 - Resize to a quarter."),
   .vmaf_rd_mult = ARG_DEF(NULL, "vmaf-rd-mult", 1,
                        "Multiplier for vmaf tunes rdmult "
-                                  "(Advanced users only, only active with tunes that utilize vmaf rdo, defaults to 100)"),
+                                  "(Meant for hyper-tuning, only active with tunes that utilize vmaf rdo, defaults to 100)"),
 #endif
+  .tpl_rd_mult = ARG_DEF(NULL, "tpl-rd-mult", 1,
+                       "Multiplier for tpl rdmult "
+                                  "(Meant for hyper-tuning, defaults to 100)"),
 #endif  // CONFIG_AV1_ENCODER
 };

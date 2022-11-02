@@ -1084,7 +1084,11 @@ typedef struct AV1EncoderConfig {
 
   int luma_bias;
 
+#if CONFIG_TUNE_VMAF
   int vmaf_preprocessing;
+
+  bool vmaf_quantization;
+#endif
 
   bool override_preprocessing;
 #if CONFIG_TUNE_BUTTERAUGLI
@@ -1108,6 +1112,8 @@ typedef struct AV1EncoderConfig {
 
   int vmaf_rd_mult;
 #endif
+
+  int tpl_rd_mult;
   /*!\endcond */
 } AV1EncoderConfig;
 

@@ -247,7 +247,10 @@ static const int av1_arg_ctrl_map[] = { AOME_SET_CPUUSED,
                                         AOME_SET_LUMA_BIAS,
                                         AV1E_SET_CHROMA_Q_OFFSET_U,
                                         AV1E_SET_CHROMA_Q_OFFSET_V,
+#if CONFIG_TUNE_VMAF
                                         AOME_SET_VMAF_PREPROCESSING,
+                                        AOME_SET_VMAF_QUANTIZATION,
+#endif
 #if CONFIG_TUNE_BUTTERAUGLI
                                         //AOME_SET_BUTTERAUGLI_RDO_BSIZE,
                                         AOME_SET_BUTTERAUGLI_INTENSITY_TARGET,
@@ -260,6 +263,7 @@ static const int av1_arg_ctrl_map[] = { AOME_SET_CPUUSED,
                                         AOME_SET_VMAF_RESIZE_FACTOR,
                                         AOME_SET_VMAF_RD_MULT,
 #endif
+                                        AOME_SET_TPL_RD_MULT,
                                         0 };
 
 const arg_def_t *main_args[] = { &g_av1_codec_arg_defs.help,
@@ -474,7 +478,10 @@ const arg_def_t *av1_ctrl_args[] = {
   &g_av1_codec_arg_defs.luma_bias,
   &g_av1_codec_arg_defs.chroma_q_offset_u,
   &g_av1_codec_arg_defs.chroma_q_offset_v,
+#if CONFIG_TUNE_VMAF
   &g_av1_codec_arg_defs.vmaf_preprocessing,
+  &g_av1_codec_arg_defs.vmaf_quantization,
+#endif
 #if CONFIG_TUNE_BUTTERAUGLI
   //&g_av1_codec_arg_defs.butteraugli_rdo_bsize,
   &g_av1_codec_arg_defs.butteraugli_intensity_target,
@@ -487,6 +494,7 @@ const arg_def_t *av1_ctrl_args[] = {
   &g_av1_codec_arg_defs.vmaf_resize_factor,
   &g_av1_codec_arg_defs.vmaf_rd_mult,
 #endif
+  &g_av1_codec_arg_defs.tpl_rd_mult,
   NULL,
 };
 

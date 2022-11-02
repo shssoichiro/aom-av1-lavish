@@ -1052,7 +1052,7 @@ int av1_get_q_for_deltaq_objective(AV1_COMP *const cpi, ThreadData *td,
     const double r0 = cpi->rd.r0;
     rk = exp((intra_cost - mc_dep_cost) / cbcmp_base);
     td->mb.rb = exp((intra_cost - mc_dep_reg) / cbcmp_base);
-    beta = (r0 / rk);
+    beta = (r0 / rk) * (double)cpi->oxcf.delta_qindex_mult / 100.0;
     assert(beta > 0.0);
   } else {
     return base_qindex;
