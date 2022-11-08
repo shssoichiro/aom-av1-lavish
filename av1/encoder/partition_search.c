@@ -648,14 +648,24 @@ static void setup_block_rdmult(const AV1_COMP *const cpi, MACROBLOCK *const x,
   }
 
   if (cpi->oxcf.tune_cfg.tuning == AOM_TUNE_LAVISH) {
-    MACROBLOCK *butteraugli_x = x;
-    MACROBLOCK *ssim_x = x;
-    av1_set_ssim_rdmult(cpi, &ssim_x->errorperbit, bsize, mi_row, mi_col,
-                        &ssim_x->rdmult);
-    av1_set_butteraugli_rdmult(cpi, butteraugli_x, bsize, mi_row, mi_col, &butteraugli_x->rdmult);
-    int lavish_rdmult = (int) (((int64_t)(butteraugli_x->rdmult * 1.333) + (int64_t)(ssim_x->rdmult)) / 2.333);
+    int lavish_rdmult = x->rdmult;
+    int lavish_errorperbit = x->errorperbit;
+    int ssim_rdmult = x->rdmult;
+    int ssim_errorperbit = x->errorperbit;
+
+    av1_set_butteraugli_rdmult(cpi, x, bsize, mi_row, mi_col, &x->rdmult);
+    int butteraugli_rdmult = x->rdmult;
+    int butteraugli_errorperbit = x->errorperbit;
+
+    av1_set_ssim_rdmult(cpi, &ssim_errorperbit, bsize, mi_row, mi_col,
+                        &ssim_rdmult);
+
+    double multiplier = (log(x->qindex) / log(30));
+
+    lavish_rdmult = (int) ((((ssim_rdmult) + (butteraugli_rdmult * multiplier)) / (1.0 + multiplier)));
+    lavish_errorperbit = (int) ((((ssim_errorperbit) + (butteraugli_errorperbit * multiplier)) / (1.0 + multiplier)));
     x->rdmult = lavish_rdmult;
-    av1_set_error_per_bit(&x->errorperbit, lavish_rdmult);
+    x->errorperbit = lavish_errorperbit;
   }
 #endif
 #if CONFIG_TUNE_VMAF

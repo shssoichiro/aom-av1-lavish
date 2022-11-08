@@ -1431,7 +1431,7 @@ AV1_COMP *av1_create_compressor(AV1_PRIMARY *ppi, const AV1EncoderConfig *oxcf,
 
 #if CONFIG_TUNE_BUTTERAUGLI
   {
-    const BLOCK_SIZE butteraugli_rdo_bsize = BLOCK_8X8;
+    const BLOCK_SIZE butteraugli_rdo_bsize = BLOCK_16X16;
     const int w = mi_size_wide[butteraugli_rdo_bsize];
     const int h = mi_size_high[butteraugli_rdo_bsize];
     const int num_cols = (mi_params->mi_cols + w - 1) / w;
@@ -2960,7 +2960,7 @@ static int encode_with_recode_loop(AV1_COMP *cpi, size_t *size, uint8_t *dest) {
         oxcf->tune_cfg.tuning == AOM_TUNE_LAVISH)) {
       loop = 1;
       if (oxcf->tune_cfg.tuning == AOM_TUNE_LAVISH) {
-        av1_setup_butteraugli_rdmult_and_restore_source(cpi, 0.8);
+        av1_setup_butteraugli_rdmult_and_restore_source(cpi, 0.0);
       } else {
         av1_setup_butteraugli_rdmult_and_restore_source(cpi, 0.4);
       }
