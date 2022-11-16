@@ -812,24 +812,6 @@ void av1_tf_do_filtering_row(AV1_COMP *cpi, ThreadData *td, int mb_row) {
   // Factor to control the filering strength.
   int filter_strength = cpi->oxcf.algo_cfg.arnr_strength;
 
-  // For psy modes, considerbly reducing temporal filtering helps with fine
-  // detail retention and gains higher fidelity. No temporal filtering would
-  // be a good option, but currently, current rate control
-  // and low usage of sharp inter/intra and prediction modes
-  // make it unwise to apply to all content. Therefore, unless the user is
-  // competent enough to change temporal filtering parameters by themselves,
-  // a temporal filtering strength of 2 has been provided to offer
-  // the most balanced default results.
-  if ((cpi->oxcf.tune_cfg.content == AOM_CONTENT_PSY ||
-      cpi->oxcf.tune_cfg.content == AOM_CONTENT_ANIMATION) &&
-      cpi->oxcf.algo_cfg.arnr_strength == 5) {
-    filter_strength = 2;
-
-  // Trust the user otherwise
-  } else {
-    filter_strength = cpi->oxcf.algo_cfg.arnr_strength;
-  }
-
   // https://bugs.chromium.org/p/aomedia/issues/detail?id=3211 seems to be
   // resolved by lowering the filtering strength to 1 on keyframes,
   // while still providing considerable compression benefits.

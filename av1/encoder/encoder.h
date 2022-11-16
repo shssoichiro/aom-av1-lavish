@@ -1099,6 +1099,8 @@ typedef struct AV1EncoderConfig {
   int butteraugli_hf_asymmetry;
 
   int butteraugli_rd_mult;
+
+  int butteraugli_resize_factor;
 #endif
 
   int loopfilter_sharpness;

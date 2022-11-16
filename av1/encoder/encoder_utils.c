@@ -776,7 +776,7 @@ BLOCK_SIZE av1_select_sb_size(const AV1EncoderConfig *const oxcf, int width,
   //but keep it only on for higher quality levels
   if (oxcf->tune_cfg.content == AOM_CONTENT_PSY && oxcf->rc_cfg.cq_level <= 30 && is_4k_or_smaller) {
     return BLOCK_64X64;
-    }
+  }
 #if CONFIG_TFLITE
   if (oxcf->q_cfg.deltaq_mode == DELTA_Q_USER_RATING_BASED) return BLOCK_64X64;
 #endif

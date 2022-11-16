@@ -2427,7 +2427,7 @@ static int encode_without_recode(AV1_COMP *cpi) {
 #endif
 
 #if CONFIG_TUNE_BUTTERAUGLI
-  if (cpi->oxcf.tune_cfg.tuning == AOM_TUNE_BUTTERAUGLI || cpi->oxcf.tune_cfg.tuning == AOM_TUNE_LAVISH) {
+  if (cpi->oxcf.tune_cfg.tuning == AOM_TUNE_BUTTERAUGLI || cpi->oxcf.tune_cfg.tuning == AOM_TUNE_LAVISH || cpi->oxcf.tune_cfg.tuning == AOM_TUNE_EXPERIMENTAL) {
     av1_setup_butteraugli_rdmult(cpi);
   }
 #endif
@@ -2720,7 +2720,7 @@ static int encode_with_recode_loop(AV1_COMP *cpi, size_t *size, uint8_t *dest) {
         cpi->oxcf.tool_cfg.enable_global_motion);
 
 #if CONFIG_TUNE_BUTTERAUGLI
-    if (oxcf->tune_cfg.tuning == AOM_TUNE_BUTTERAUGLI || oxcf->tune_cfg.tuning == AOM_TUNE_LAVISH) {
+    if (oxcf->tune_cfg.tuning == AOM_TUNE_BUTTERAUGLI || oxcf->tune_cfg.tuning == AOM_TUNE_LAVISH || oxcf->tune_cfg.tuning == AOM_TUNE_EXPERIMENTAL) {
       if (loop_count == 0) {
         original_q = q;
         // TODO(sdeng): different q here does not make big difference. Use a
@@ -2957,9 +2957,10 @@ static int encode_with_recode_loop(AV1_COMP *cpi, size_t *size, uint8_t *dest) {
 
 #if CONFIG_TUNE_BUTTERAUGLI
     if (loop_count == 0 && (oxcf->tune_cfg.tuning == AOM_TUNE_BUTTERAUGLI ||
-        oxcf->tune_cfg.tuning == AOM_TUNE_LAVISH)) {
+        oxcf->tune_cfg.tuning == AOM_TUNE_LAVISH ||
+        oxcf->tune_cfg.tuning == AOM_TUNE_EXPERIMENTAL)) {
       loop = 1;
-      if (oxcf->tune_cfg.tuning == AOM_TUNE_LAVISH) {
+      if (oxcf->tune_cfg.tuning == AOM_TUNE_LAVISH || AOM_TUNE_EXPERIMENTAL) {
         av1_setup_butteraugli_rdmult_and_restore_source(cpi, 0.0);
       } else {
         av1_setup_butteraugli_rdmult_and_restore_source(cpi, 0.4);
@@ -3651,7 +3652,8 @@ static int encode_frame_to_data_rate(AV1_COMP *cpi, size_t *size,
   if (oxcf->tune_cfg.tuning == AOM_TUNE_VMAF_WITHOUT_PREPROCESSING ||
       oxcf->tune_cfg.tuning == AOM_TUNE_VMAF_MAX_GAIN ||
       oxcf->tune_cfg.tuning == AOM_TUNE_VMAF_NEG_MAX_GAIN ||
-      oxcf->tune_cfg.tuning == AOM_TUNE_LAVISH_VMAF_RD) {
+      oxcf->tune_cfg.tuning == AOM_TUNE_LAVISH_VMAF_RD ||
+      oxcf->tune_cfg.tuning == AOM_TUNE_EXPERIMENTAL) {
     av1_set_mb_vmaf_rdmult_scaling(cpi);
   }
 #endif

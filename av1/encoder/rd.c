@@ -1129,7 +1129,7 @@ void av1_model_rd_curvfit(BLOCK_SIZE bsize, double sse_norm, double xqr,
   const int dcat = sse_norm_curvfit_model_cat_lookup(sse_norm);
   (void)x_end;
 
-  if (cpi->oxcf.tune_cfg.tuning == AOM_TUNE_OMNI) { // Wizard shit, thanks Opmox
+  if (cpi->oxcf.tune_cfg.tuning == AOM_TUNE_OMNI || cpi->oxcf.enable_experimental_psy == 1) { // Wizard shit, thanks Opmox
     xqr /= 6.f;
   }
   xqr = AOMMAX(xqr, x_start + x_step + epsilon);

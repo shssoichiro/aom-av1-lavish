@@ -50,6 +50,7 @@ static const struct arg_enum_list tuning_enum[] = {
   { "lavish", AOM_TUNE_LAVISH },
   { "lavish_fast", AOM_TUNE_LAVISH_FAST },
   { "lavish_vmaf_rd", AOM_TUNE_LAVISH_VMAF_RD },
+  { "experimental", AOM_TUNE_EXPERIMENTAL },
   { "omni", AOM_TUNE_OMNI },
   { "ipq", AOM_TUNE_IMAGE_PERCEPTUAL_QUALITY },
   { "ipq_vmaf_psy", AOM_TUNE_IMAGE_PERCEPTUAL_QUALITY_VMAF_PSY_QP }, // Tunes at this point and after use VMAF Q Adjustment
@@ -734,6 +735,9 @@ const av1_codec_arg_definitions_t g_av1_codec_arg_defs = {
   .butteraugli_rd_mult = ARG_DEF(NULL, "butteraugli-rd-mult", 1,
                        "Multiplier for butteraugli tunes rdmult "
                                   "(Meant for hyper-tuning, only active with tunes that utilize butteraugli rdo, defaults to 100)"),
+  .butteraugli_resize_factor = ARG_DEF(NULL, "butteraugli-resize-factor", 1,
+                       "Change internal resizing for faster calculations with Butteraugli tunes\n "
+                       "                                        0 - Do not resize, 1 - Resize to half res (Default), 2 - Resize to quarter res."),
 #endif
   .loopfilter_sharpness = ARG_DEF(NULL, "loopfilter-sharpness", 1,
                        "Adjust sharpness for the loopfilter, can reduce detail blur at the expense of artifacts. ((0)..7)"),

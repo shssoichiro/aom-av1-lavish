@@ -20,7 +20,7 @@
 #include "av1/encoder/var_based_part.h"
 #include "aom_ports/mem.h"
 
-static const int resize_factor = 2;
+//static const int resize_factor = 2;
 
 static void set_mb_butteraugli_rdmult_scaling(AV1_COMP *cpi,
                                               const YV12_BUFFER_CONFIG *source,
@@ -36,6 +36,13 @@ static void set_mb_butteraugli_rdmult_scaling(AV1_COMP *cpi,
   const int height = source->y_crop_height;
   const int ss_x = source->subsampling_x;
   const int ss_y = source->subsampling_y;
+  const int resize_factor = (cpi->oxcf.butteraugli_resize_factor == 0)
+                                ? 1
+                                : (cpi->oxcf.butteraugli_resize_factor == 1)
+                                      ? 2
+                                      : (cpi->oxcf.butteraugli_resize_factor == 2)
+                                        ? 4
+                                        : 2;
   const BLOCK_SIZE butteraugli_rdo_bsize = BLOCK_16X16;
   float *diffmap;
   CHECK_MEM_ERROR(cm, diffmap, aom_malloc(width * height * sizeof(*diffmap)));
@@ -102,8 +109,14 @@ static void set_mb_butteraugli_rdmult_scaling(AV1_COMP *cpi,
         } else {
           blk_count += 1.0;
           weight = dmse / dbutteraugli;
-          weight = AOMMIN(weight, 5.0);
-          weight += K;
+          if (cpi->oxcf.enable_experimental_psy == 1) {
+            weight = AOMMIN(weight, 2.5);
+          } else {
+            weight = AOMMIN(weight, 5.0);
+          }
+          if (cpi->oxcf.enable_experimental_psy == 0) {
+            weight += K;
+          }
           log_sum += log(weight);
         }
         cpi->butteraugli_info.rdmult_scaling_factors[index] = weight;
@@ -176,8 +189,14 @@ static void set_mb_butteraugli_rdmult_scaling(AV1_COMP *cpi,
       } else {
         *weight /= log_sum;
       }
-      *weight = AOMMIN(*weight, 2.5);
-      *weight = AOMMAX(*weight, 0.4);
+      if (cpi->oxcf.enable_experimental_psy == 1) { // Testing custom butteraugli changes...
+        //printf("%f\n", *weight);
+        *weight = AOMMIN(*weight, 2.0);
+        *weight = AOMMAX(*weight, 0.1);
+      } else {
+        *weight = AOMMIN(*weight, 2.5);
+        *weight = AOMMAX(*weight, 0.4);
+      }
     }
   }
   aom_free(diffmap);
@@ -186,7 +205,7 @@ static void set_mb_butteraugli_rdmult_scaling(AV1_COMP *cpi,
 void av1_set_butteraugli_rdmult(const AV1_COMP *cpi, MACROBLOCK *x,
                                 BLOCK_SIZE bsize, int mi_row, int mi_col,
                                 int *rdmult) {
-  assert(cpi->oxcf.tune_cfg.tuning == AOM_TUNE_BUTTERAUGLI || cpi->oxcf.tune_cfg.tuning == AOM_TUNE_LAVISH);
+  assert(cpi->oxcf.tune_cfg.tuning == AOM_TUNE_BUTTERAUGLI || cpi->oxcf.tune_cfg.tuning == AOM_TUNE_LAVISH || cpi->oxcf.tune_cfg.tuning == AOM_TUNE_EXPERIMENTAL);
   if (!cpi->butteraugli_info.recon_set) {
     return;
   }
@@ -298,6 +317,13 @@ void av1_setup_butteraugli_source(AV1_COMP *cpi) {
   const int bit_depth = cpi->td.mb.e_mbd.bd;
   const int ss_x = cpi->source->subsampling_x;
   const int ss_y = cpi->source->subsampling_y;
+  const int resize_factor = (cpi->oxcf.butteraugli_resize_factor == 0)
+                                ? 1
+                                : (cpi->oxcf.butteraugli_resize_factor == 1)
+                                      ? 2
+                                      : (cpi->oxcf.butteraugli_resize_factor == 2)
+                                        ? 4
+                                        : 2;
   if (dst->buffer_alloc_sz == 0) {
     aom_alloc_frame_buffer(
         dst, width, height, ss_x, ss_y, cm->seq_params->use_highbitdepth,
@@ -332,6 +358,13 @@ void av1_setup_butteraugli_rdmult_and_restore_source(AV1_COMP *cpi, double K) {
   const int height = cpi->source->y_crop_height;
   const int ss_x = cpi->source->subsampling_x;
   const int ss_y = cpi->source->subsampling_y;
+  const int resize_factor = (cpi->oxcf.butteraugli_resize_factor == 0)
+                                ? 1
+                                : (cpi->oxcf.butteraugli_resize_factor == 1)
+                                      ? 2
+                                      : (cpi->oxcf.butteraugli_resize_factor == 2)
+                                        ? 4
+                                        : 2;
 
   YV12_BUFFER_CONFIG resized_recon;
   memset(&resized_recon, 0, sizeof(resized_recon));
@@ -401,7 +434,7 @@ void av1_setup_butteraugli_rdmult(AV1_COMP *cpi) {
 
   av1_set_variance_partition_thresholds(cpi, q_index, 0);
   av1_encode_frame(cpi);
-  if (cpi->oxcf.tune_cfg.tuning == AOM_TUNE_LAVISH) {
+  if (cpi->oxcf.tune_cfg.tuning == AOM_TUNE_LAVISH || cpi->oxcf.tune_cfg.tuning == AOM_TUNE_EXPERIMENTAL) {
     av1_setup_butteraugli_rdmult_and_restore_source(cpi, 0.0);
   } else {
     av1_setup_butteraugli_rdmult_and_restore_source(cpi, 0.3);

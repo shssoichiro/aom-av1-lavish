@@ -33,6 +33,8 @@ int aom_calc_butteraugli(const YV12_BUFFER_CONFIG *source,
   if (matrix_coefficients == AOM_CICP_MC_BT_709) {
     if (color_range == AOM_CR_FULL_RANGE) return 0;
     yuv_constants = &kYuvH709Constants;
+  } else if (matrix_coefficients == AOM_CICP_MC_BT_2020_NCL || matrix_coefficients == AOM_CICP_MC_BT_2020_CL) {
+    yuv_constants = color_range == AOM_CR_FULL_RANGE ? &kYuvV2020Constants : &kYuv2020Constants;
   } else {
     yuv_constants = color_range == AOM_CR_FULL_RANGE ? &kYuvJPEGConstants
                                                      : &kYuvI601Constants;

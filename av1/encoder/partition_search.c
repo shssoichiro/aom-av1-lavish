@@ -609,7 +609,6 @@ static void setup_block_rdmult(const AV1_COMP *const cpi, MACROBLOCK *const x,
   if (cpi->oxcf.tune_cfg.tuning == AOM_TUNE_SSIM ||
       cpi->oxcf.tune_cfg.tuning == AOM_TUNE_IMAGE_PERCEPTUAL_QUALITY ||
       cpi->oxcf.tune_cfg.tuning == AOM_TUNE_IMAGE_PERCEPTUAL_QUALITY_VMAF_PSY_QP ||
-      cpi->oxcf.tune_cfg.tuning == AOM_TUNE_LAVISH ||
       cpi->oxcf.tune_cfg.tuning == AOM_TUNE_LAVISH_FAST) {
     av1_set_ssim_rdmult(cpi, &x->errorperbit, bsize, mi_row, mi_col,
                         &x->rdmult);
@@ -649,23 +648,12 @@ static void setup_block_rdmult(const AV1_COMP *const cpi, MACROBLOCK *const x,
 
   if (cpi->oxcf.tune_cfg.tuning == AOM_TUNE_LAVISH) {
     int lavish_rdmult = x->rdmult;
-    int lavish_errorperbit = x->errorperbit;
+    av1_set_butteraugli_rdmult(cpi, x, bsize, mi_row, mi_col, &lavish_rdmult);
     int ssim_rdmult = x->rdmult;
-    int ssim_errorperbit = x->errorperbit;
-
-    av1_set_butteraugli_rdmult(cpi, x, bsize, mi_row, mi_col, &x->rdmult);
-    int butteraugli_rdmult = x->rdmult;
-    int butteraugli_errorperbit = x->errorperbit;
-
-    av1_set_ssim_rdmult(cpi, &ssim_errorperbit, bsize, mi_row, mi_col,
+    av1_set_ssim_rdmult(cpi, &x->errorperbit, bsize, mi_row, mi_col,
                         &ssim_rdmult);
 
-    double multiplier = (log(x->qindex) / log(30));
-
-    lavish_rdmult = (int) ((((ssim_rdmult) + (butteraugli_rdmult * multiplier)) / (1.0 + multiplier)));
-    lavish_errorperbit = (int) ((((ssim_errorperbit) + (butteraugli_errorperbit * multiplier)) / (1.0 + multiplier)));
-    x->rdmult = lavish_rdmult;
-    x->errorperbit = lavish_errorperbit;
+    x->rdmult = (int) (((int64_t)(lavish_rdmult * 2.5) + (int64_t)(ssim_rdmult)) / 3.5);
   }
 #endif
 #if CONFIG_TUNE_VMAF
@@ -678,6 +666,29 @@ static void setup_block_rdmult(const AV1_COMP *const cpi, MACROBLOCK *const x,
 
     x->rdmult = (int) (((int64_t)(vmaf_rdmult * 2.5) + (int64_t)(ssim_rdmult)) / 3.5);
   }
+
+#if CONFIG_TUNE_BUTTERAUGLI
+  if (cpi->oxcf.tune_cfg.tuning == AOM_TUNE_EXPERIMENTAL) {
+    int exp_rdmult = x->rdmult;
+
+    int butteraugli_rdmult = x->rdmult;
+    av1_set_butteraugli_rdmult(cpi, x, bsize, mi_row, mi_col, &butteraugli_rdmult);
+
+    int vmaf_rdmult = x->rdmult;
+    av1_set_vmaf_rdmult(cpi, x, bsize, mi_row, mi_col, &vmaf_rdmult);
+
+    if (cpi->oxcf.enable_experimental_psy == 1) {
+      if (vmaf_rdmult > exp_rdmult) { // if normal rdmult is less than tuned rdmult, obtain mean of both (less distortion tuning)
+        vmaf_rdmult = ((vmaf_rdmult + exp_rdmult) / 2);
+      }
+      if (butteraugli_rdmult > exp_rdmult) {
+        butteraugli_rdmult = ((butteraugli_rdmult + exp_rdmult) / 2);
+      }
+    }
+    exp_rdmult = (int) (((int64_t)(vmaf_rdmult * 2.5) + (int64_t)(butteraugli_rdmult)) / 3.5);
+    x->rdmult = exp_rdmult;
+  }
+#endif
 #endif
   if (cpi->oxcf.mode == ALLINTRA || cpi->oxcf.tune_cfg.content == AOM_CONTENT_PSY) {
     x->rdmult = (int)(((int64_t)x->rdmult * x->intra_sb_rdmult_modifier) >> 7);
