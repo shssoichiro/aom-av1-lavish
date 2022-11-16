@@ -140,7 +140,9 @@ static int search_filter_level(const YV12_BUFFER_CONFIG *sd, AV1_COMP *cpi,
 
     // Bias against raising loop filter in favor of lowering it.
     int64_t bias = (best_err >> (15 - (filt_mid / 8))) * filter_step;
-
+    if (cpi->oxcf.enable_experimental_psy == 1) {
+      bias = (bias * 2);
+    }
     if ((is_stat_consumption_stage_twopass(cpi)) &&
         (cpi->ppi->twopass.section_intra_rating < 20))
       bias = (bias * cpi->ppi->twopass.section_intra_rating) / 20;

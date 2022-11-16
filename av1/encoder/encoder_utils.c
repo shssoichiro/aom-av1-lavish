@@ -813,6 +813,14 @@ BLOCK_SIZE av1_select_sb_size(const AV1EncoderConfig *const oxcf, int width,
   if (oxcf->tool_cfg.superblock_size == AOM_SUPERBLOCK_SIZE_128X128) {
     return BLOCK_128X128;
   }
+  //Sketchy code to check whether or not a video/image is small enough to only use 64x64 SBs without downsides
+  int is_4k_or_smaller = (width * height) < (2700 * 2160);
+
+  //Force 64x64 superblock size to improve psycho-visual quality in video content
+  //but keep it only on for higher quality levels
+  if (oxcf->tune_cfg.content == AOM_CONTENT_PSY && oxcf->rc_cfg.cq_level <= 30 && is_4k_or_smaller) {
+    return BLOCK_64X64;
+  }
 #if CONFIG_TFLITE
   if (oxcf->q_cfg.deltaq_mode == DELTA_Q_USER_RATING_BASED) return BLOCK_64X64;
 #endif
