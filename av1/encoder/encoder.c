@@ -2735,7 +2735,7 @@ static int encode_with_recode_loop(AV1_COMP *cpi, size_t *size, uint8_t *dest) {
     cpi->is_screen_content_type = 0;
   }
   // Determine whether to use screen content tools using two fast encoding.
-  if (!cpi->sf.hl_sf.disable_extra_sc_testing && !cpi->use_ducky_encode)
+  if (!cpi->sf.hl_sf.disable_extra_sc_testing && !cpi->use_ducky_encode) {
     av1_determine_sc_tools_with_encoding(cpi, q);
   }
 #endif  // !CONFIG_RD_COMMAND

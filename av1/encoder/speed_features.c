@@ -1289,7 +1289,6 @@ static void set_rt_speed_feature_framesize_dependent(const AV1_COMP *const cpi,
         sf->rt_sf.reuse_inter_pred_nonrd = 0;
       }
 #endif
-#endif
       sf->rt_sf.use_adaptive_subpel_search = false;
     }
     if (speed >= 10) {
