@@ -14,9 +14,9 @@
 
 #include "aom/aom_integer.h"
 
-void aom_sadMxNx4d_avx2(int M, int N, const uint8_t *src, int src_stride,
-                        const uint8_t *const ref[4], int ref_stride,
-                        uint32_t res[4]) {
+static AOM_FORCE_INLINE void aom_sadMxNx4d_avx2(
+    int M, int N, const uint8_t *src, int src_stride,
+    const uint8_t *const ref[4], int ref_stride, uint32_t res[4]) {
   __m256i src_reg, ref0_reg, ref1_reg, ref2_reg, ref3_reg;
   __m256i sum_ref0, sum_ref1, sum_ref2, sum_ref3;
   int i, j;
@@ -59,27 +59,24 @@ void aom_sadMxNx4d_avx2(int M, int N, const uint8_t *src, int src_stride,
   }
   {
     __m128i sum;
-    __m256i sum_mlow, sum_mhigh;
-    // in sum_ref-i the result is saved in the first 4 bytes
-    // the other 4 bytes are zeroed.
-    // sum_ref1 and sum_ref3 are shifted left by 4 bytes
-    sum_ref1 = _mm256_slli_si256(sum_ref1, 4);
-    sum_ref3 = _mm256_slli_si256(sum_ref3, 4);
-
+    // In sum_ref-i the result is saved in the first 4 bytes and the other 4
+    // bytes are zeroed.
     // merge sum_ref0 and sum_ref1 also sum_ref2 and sum_ref3
-    sum_ref0 = _mm256_or_si256(sum_ref0, sum_ref1);
-    sum_ref2 = _mm256_or_si256(sum_ref2, sum_ref3);
+    // 0, 0, 1, 1
+    sum_ref0 = _mm256_castps_si256(_mm256_shuffle_ps(
+        _mm256_castsi256_ps(sum_ref0), _mm256_castsi256_ps(sum_ref1),
+        _MM_SHUFFLE(2, 0, 2, 0)));
+    // 2, 2, 3, 3
+    sum_ref2 = _mm256_castps_si256(_mm256_shuffle_ps(
+        _mm256_castsi256_ps(sum_ref2), _mm256_castsi256_ps(sum_ref3),
+        _MM_SHUFFLE(2, 0, 2, 0)));
 
-    // merge every 64 bit from each sum_ref-i
-    sum_mlow = _mm256_unpacklo_epi64(sum_ref0, sum_ref2);
-    sum_mhigh = _mm256_unpackhi_epi64(sum_ref0, sum_ref2);
-
-    // add the low 64 bit to the high 64 bit
-    sum_mlow = _mm256_add_epi32(sum_mlow, sum_mhigh);
+    // sum adjacent 32 bit integers
+    sum_ref0 = _mm256_hadd_epi32(sum_ref0, sum_ref2);
 
     // add the low 128 bit to the high 128 bit
-    sum = _mm_add_epi32(_mm256_castsi256_si128(sum_mlow),
-                        _mm256_extractf128_si256(sum_mlow, 1));
+    sum = _mm_add_epi32(_mm256_castsi256_si128(sum_ref0),
+                        _mm256_extractf128_si256(sum_ref0, 1));
 
     _mm_storeu_si128((__m128i *)(res), sum);
   }

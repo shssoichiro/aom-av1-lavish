@@ -18,7 +18,9 @@
 #include <fstream>
 #include <memory>
 #include <numeric>
+#include <random>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 #include "av1/qmode_rc/ducky_encode.h"
@@ -237,7 +239,7 @@ class RateControlQModeTest : public ::testing::Test {
     rc_param_.frame_width = kFrameWidth;
   }
 
-  RateControlParam rc_param_;
+  RateControlParam rc_param_ = {};
 };
 
 TEST_F(RateControlQModeTest, ConstructGopARF) {
@@ -1037,12 +1039,20 @@ TEST_F(RateControlQModeTest, TestGetGopEncodeInfo) {
     frame_rate,  AOM_IMG_FMT_I420,
     50,          libaom_test::GetDataPath() + "/hantro_collage_w352h288.yuv"
   };
-  DuckyEncode ducky_encode(input_video, rc_param_.max_ref_frames, 3,
-                           rc_param_.base_q_index);
+  DuckyEncode ducky_encode(input_video, BLOCK_64X64, rc_param_.max_ref_frames,
+                           3, rc_param_.base_q_index);
+
+  std::vector<aom::GopEncodeInfo> gop_encode_info_list;
+  for (const auto &gop_struct : gop_list) {
+    const auto gop_encode_info = rc.GetTplPassGopEncodeInfo(gop_struct);
+    ASSERT_TRUE(gop_encode_info.ok());
+    gop_encode_info_list.push_back(gop_encode_info.value());
+  }
+
   ducky_encode.StartEncode(firstpass_info.stats_list);
   // Read TPL stats
   std::vector<TplGopStats> tpl_gop_list =
-      ducky_encode.ComputeTplStats(gop_list);
+      ducky_encode.ComputeTplStats(gop_list, gop_encode_info_list);
   ducky_encode.EndEncode();
   RefFrameTable ref_frame_table;
   int num_gop_skipped = 0;
@@ -1090,7 +1100,7 @@ TEST_F(RateControlQModeTest, GetGopEncodeInfoRefFrameMissingBlockStats) {
 
   // Only frame 0 has TPL block stats.
   TplGopStats tpl_gop_stats;
-  tpl_gop_stats.frame_stats_list.assign(3, { 8, 176, 144, false, {} });
+  tpl_gop_stats.frame_stats_list.assign(3, { 8, 176, 144, false, {}, {} });
   tpl_gop_stats.frame_stats_list[0] = CreateToyTplFrameStatsWithDiffSizes(8, 8);
 
   AV1RateControlQMode rc;
@@ -1117,6 +1127,47 @@ TEST_F(RateControlQModeTest, TestMock) {
   const auto result = mock_rc.DetermineGopInfo(firstpass_info);
   EXPECT_EQ(result.status().code, AOM_CODEC_ERROR);
   EXPECT_EQ(result.status().message, "message");
+}
+
+TEST_F(RateControlQModeTest, TestKMeans) {
+  // The distance between intended centroids is designed so each cluster is far
+  // enough from others.
+  std::vector<int> centroids_ref = { 16, 48, 80, 112, 144, 176, 208, 240 };
+  std::vector<uint8_t> random_input;
+  const int num_sample_per_cluster = 10;
+  const int num_clusters = 8;
+  std::default_random_engine generator;
+  for (const int centroid : centroids_ref) {
+    // This is to make sure each cluster is far enough from others.
+    std::uniform_int_distribution<int> distribution(centroid - 8, centroid + 8);
+    for (int i = 0; i < num_sample_per_cluster; ++i) {
+      const int random_sample = distribution(generator);
+      random_input.push_back(static_cast<uint8_t>(random_sample));
+    }
+  }
+  std::shuffle(random_input.begin(), random_input.end(), generator);
+  std::unordered_map<int, int> kmeans_result =
+      aom::internal::KMeans(random_input, num_clusters);
+
+  std::unordered_set<int> found_centroids;
+  for (const auto &result : kmeans_result) {
+    found_centroids.insert(result.second);
+  }
+  // Verify there're num_clusters in the k-means result.
+  EXPECT_EQ(static_cast<int>(found_centroids.size()), num_clusters);
+
+  // Verify that for each data point, the assigned centroid is the closest one.
+  for (const auto &result : kmeans_result) {
+    const int distance_from_cluster_centroid =
+        abs(result.first - result.second);
+    for (const int centroid : found_centroids) {
+      if (centroid == result.second) continue;
+      const int distance_from_other_cluster_centroid =
+          abs(result.first - centroid);
+      EXPECT_LE(distance_from_cluster_centroid,
+                distance_from_other_cluster_centroid);
+    }
+  }
 }
 
 }  // namespace aom

@@ -260,6 +260,7 @@ typedef struct av1_codec_arg_definitions {
   arg_def_t vmaf_rd_mult;
 #endif
   arg_def_t tpl_rd_mult;
+  arg_def_t sb_qp_sweep;
 #endif  // CONFIG_AV1_ENCODER
 } av1_codec_arg_definitions_t;
 

@@ -11,6 +11,7 @@
 #ifndef AOM_AV1_ENCODER_SVC_LAYERCONTEXT_H_
 #define AOM_AV1_ENCODER_SVC_LAYERCONTEXT_H_
 
+#include "aom_scale/yv12config.h"
 #include "av1/encoder/aq_cyclicrefresh.h"
 #include "av1/encoder/encoder.h"
 #include "av1/encoder/ratectrl.h"
@@ -106,7 +107,9 @@ typedef struct SVC {
   int temporal_layer_fb[REF_FRAMES];
   int num_encoded_top_layer;
   int first_layer_denoise;
-  int high_source_sad_superframe;
+  YV12_BUFFER_CONFIG source_last_TL0;
+  int mi_cols_full_resoln;
+  int mi_rows_full_resoln;
   /*!\endcond */
 
   /*!
@@ -137,6 +140,7 @@ typedef struct SVC {
 } SVC;
 
 struct AV1_COMP;
+struct EncodeFrameInput;
 
 /*!\brief Initialize layer context data from init_config().
  *
@@ -276,6 +280,10 @@ void av1_get_layer_resolution(const int width_org, const int height_org,
 void av1_set_svc_fixed_mode(struct AV1_COMP *const cpi);
 
 void av1_svc_check_reset_layer_rc_flag(struct AV1_COMP *const cpi);
+
+void av1_svc_set_last_source(struct AV1_COMP *const cpi,
+                             struct EncodeFrameInput *frame_input,
+                             YV12_BUFFER_CONFIG *prev_source);
 
 #ifdef __cplusplus
 }  // extern "C"

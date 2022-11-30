@@ -59,23 +59,6 @@ void av1_set_ssim_rdmult(const AV1_COMP *const cpi, int *errorperbit,
 
 // TODO(angiebird): Move these function to tpl_model.c
 #if !CONFIG_REALTIME_ONLY
-static AOM_INLINE int set_deltaq_rdmult(const AV1_COMP *const cpi,
-                                        const MACROBLOCK *const x) {
-  const AV1_COMMON *const cm = &cpi->common;
-  const CommonQuantParams *quant_params = &cm->quant_params;
-  int deltaq_multiplier = 100;
-  if ((cpi->oxcf.delta_qindex_mult_pos >= 0) && (x->delta_qindex > 0)) {
-    deltaq_multiplier = cpi->oxcf.delta_qindex_mult_pos;
-  } else if ((cpi->oxcf.delta_qindex_mult_neg >= 0) && (x->delta_qindex < 0)) {
-    deltaq_multiplier = cpi->oxcf.delta_qindex_mult_neg;
-  } else {
-    deltaq_multiplier = cpi->oxcf.delta_qindex_mult;
-  }
-
-  return av1_compute_rd_mult(cpi, quant_params->base_qindex + (int)round(x->delta_qindex * deltaq_multiplier / 100.0) +
-                                      quant_params->y_dc_delta_q);
-}
-
 // Return the end column for the current superblock, in unit of TPL blocks.
 static int get_superblock_tpl_column_end(const AV1_COMMON *const cm, int mi_col,
                                          int num_mi_w) {
@@ -103,7 +86,7 @@ int av1_get_cb_rdmult(const AV1_COMP *const cpi, MACROBLOCK *const x,
   assert(IMPLIES(cpi->ppi->gf_group.size > 0,
                  cpi->gf_frame_index < cpi->ppi->gf_group.size));
   const int tpl_idx = cpi->gf_frame_index;
-  int deltaq_rdmult = set_deltaq_rdmult(cpi, x);
+  int deltaq_rdmult = set_rdmult(cpi, x, -1);
   if (!av1_tpl_stats_ready(&cpi->ppi->tpl_data, tpl_idx)) return deltaq_rdmult;
   if (cm->superres_scale_denominator != SCALE_NUMERATOR) return deltaq_rdmult;
   if (cpi->oxcf.q_cfg.aq_mode != NO_AQ) return deltaq_rdmult;
@@ -157,7 +140,7 @@ int av1_get_hier_tpl_rdmult(const AV1_COMP *const cpi, MACROBLOCK *const x,
   assert(IMPLIES(cpi->ppi->gf_group.size > 0,
                  cpi->gf_frame_index < cpi->ppi->gf_group.size));
   const int tpl_idx = cpi->gf_frame_index;
-  const int deltaq_rdmult = set_deltaq_rdmult(cpi, x);
+  const int deltaq_rdmult = set_rdmult(cpi, x, -1);
   if (!av1_tpl_stats_ready(&cpi->ppi->tpl_data, tpl_idx)) return deltaq_rdmult;
   if (!is_frame_tpl_eligible(gf_group, cpi->gf_frame_index))
     return deltaq_rdmult;
@@ -199,7 +182,7 @@ int av1_get_hier_tpl_rdmult(const AV1_COMP *const cpi, MACROBLOCK *const x,
   av1_set_error_per_bit(&x->errorperbit, rdmult);
 #if !CONFIG_RD_COMMAND
   if (bsize == cm->seq_params->sb_size) {
-    const int rdmult_sb = set_deltaq_rdmult(cpi, x);
+    const int rdmult_sb = set_rdmult(cpi, x, -1);
     assert(rdmult_sb == rdmult);
     (void)rdmult_sb;
   }
@@ -339,10 +322,10 @@ void av1_update_state(const AV1_COMP *const cpi, ThreadData *td,
 
     if (!dry_run && !mi_addr->skip_txfm) {
       int cdf_num;
-      const int spatial_pred = av1_get_spatial_seg_pred(
+      const uint8_t spatial_pred = av1_get_spatial_seg_pred(
           cm, xd, &cdf_num, cpi->cyclic_refresh->skip_over4x4);
-      const int coded_id = av1_neg_interleave(mi_addr->segment_id, spatial_pred,
-                                              seg->last_active_segid + 1);
+      const uint8_t coded_id = av1_neg_interleave(
+          mi_addr->segment_id, spatial_pred, seg->last_active_segid + 1);
       int64_t spatial_cost = x->mode_costs.spatial_pred_cost[cdf_num][coded_id];
       td->rd_counts.seg_tmp_pred_cost[0] += spatial_cost;
 
@@ -352,7 +335,7 @@ void av1_update_state(const AV1_COMP *const cpi, ThreadData *td,
                                mi_col)
               : 0;
       const int use_tmp_pred = pred_segment_id == mi_addr->segment_id;
-      const int tmp_pred_ctx = av1_get_pred_context_seg_id(xd);
+      const uint8_t tmp_pred_ctx = av1_get_pred_context_seg_id(xd);
       td->rd_counts.seg_tmp_pred_cost[1] +=
           x->mode_costs.tmp_pred_cost[tmp_pred_ctx][use_tmp_pred];
       if (!use_tmp_pred) {
@@ -1388,26 +1371,30 @@ static int fast_detect_non_zero_motion(AV1_COMP *cpi, const uint8_t *src_y,
 // its collocated block in the last frame.
 void av1_source_content_sb(AV1_COMP *cpi, MACROBLOCK *x, TileDataEnc *tile_data,
                            int mi_row, int mi_col) {
+  if (cpi->last_source->y_width != cpi->source->y_width ||
+      cpi->last_source->y_height != cpi->source->y_height)
+    return;
+#if CONFIG_AV1_HIGHBITDEPTH
+  if (x->e_mbd.cur_buf->flags & YV12_FLAG_HIGHBITDEPTH) return;
+#endif
+
   unsigned int tmp_sse;
   unsigned int tmp_variance;
   const BLOCK_SIZE bsize = cpi->common.seq_params->sb_size;
   uint8_t *src_y = cpi->source->y_buffer;
-  int src_ystride = cpi->source->y_stride;
+  const int src_ystride = cpi->source->y_stride;
+  const int src_offset = src_ystride * (mi_row << 2) + (mi_col << 2);
   uint8_t *last_src_y = cpi->last_source->y_buffer;
-  int last_src_ystride = cpi->last_source->y_stride;
-  const int offset = cpi->source->y_stride * (mi_row << 2) + (mi_col << 2);
+  const int last_src_ystride = cpi->last_source->y_stride;
+  const int last_src_offset = last_src_ystride * (mi_row << 2) + (mi_col << 2);
   uint64_t avg_source_sse_threshold_verylow = 10000;     // ~1.5*1.5*(64*64)
   uint64_t avg_source_sse_threshold_low[2] = { 100000,   // ~5*5*(64*64)
                                                36000 };  // ~3*3*(64*64)
 
   uint64_t avg_source_sse_threshold_high = 1000000;  // ~15*15*(64*64)
   uint64_t sum_sq_thresh = 10000;  // sum = sqrt(thresh / 64*64)) ~1.5
-#if CONFIG_AV1_HIGHBITDEPTH
-  MACROBLOCKD *xd = &x->e_mbd;
-  if (xd->cur_buf->flags & YV12_FLAG_HIGHBITDEPTH) return;
-#endif
-  src_y += offset;
-  last_src_y += offset;
+  src_y += src_offset;
+  last_src_y += last_src_offset;
   tmp_variance = cpi->ppi->fn_ptr[bsize].vf(src_y, src_ystride, last_src_y,
                                             last_src_ystride, &tmp_sse);
   // rd thresholds
@@ -1415,9 +1402,11 @@ void av1_source_content_sb(AV1_COMP *cpi, MACROBLOCK *x, TileDataEnc *tile_data,
     x->content_state_sb.source_sad_rd = kLowSad;
 
   // nonrd thresholds
-  if (tmp_sse == 0)
+  if (tmp_sse == 0) {
     x->content_state_sb.source_sad_nonrd = kZeroSad;
-  else if (tmp_sse < avg_source_sse_threshold_verylow)
+    return;
+  }
+  if (tmp_sse < avg_source_sse_threshold_verylow)
     x->content_state_sb.source_sad_nonrd = kVeryLowSad;
   else if (tmp_sse < avg_source_sse_threshold_low[0])
     x->content_state_sb.source_sad_nonrd = kLowSad;
@@ -1426,19 +1415,13 @@ void av1_source_content_sb(AV1_COMP *cpi, MACROBLOCK *x, TileDataEnc *tile_data,
 
   // Detect large lighting change.
   // Note: tmp_sse - tmp_variance = ((sum * sum) >> 12)
-  if (tmp_sse > 0) {
-    if (tmp_variance < (tmp_sse >> 1) &&
-        (tmp_sse - tmp_variance) > sum_sq_thresh)
-      x->content_state_sb.lighting_change = 1;
-    if ((tmp_sse - tmp_variance) < (sum_sq_thresh >> 1))
-      x->content_state_sb.low_sumdiff = 1;
-  }
+  if (tmp_variance < (tmp_sse >> 1) && (tmp_sse - tmp_variance) > sum_sq_thresh)
+    x->content_state_sb.lighting_change = 1;
+  if ((tmp_sse - tmp_variance) < (sum_sq_thresh >> 1))
+    x->content_state_sb.low_sumdiff = 1;
 
-  if (cpi->last_source->y_width != cpi->source->y_width ||
-      cpi->last_source->y_height != cpi->source->y_height)
-    return;
-  if (!cpi->sf.rt_sf.use_rtc_tf || tmp_sse == 0 || cpi->rc.high_source_sad ||
-      cpi->rc.frame_source_sad > 20000)
+  if (!cpi->sf.rt_sf.use_rtc_tf || cpi->rc.high_source_sad ||
+      cpi->rc.frame_source_sad > 20000 || cpi->svc.number_spatial_layers > 1)
     return;
 
   // In-place temporal filter. If psnr calculation is enabled, we store the
@@ -1557,8 +1540,12 @@ void av1_backup_sb_state(SB_FIRST_PASS_STATS *sb_fp_stats, const AV1_COMP *cpi,
 
   sb_fp_stats->fc = *td->counts;
 
-  memcpy(sb_fp_stats->inter_mode_rd_models, tile_data->inter_mode_rd_models,
-         sizeof(sb_fp_stats->inter_mode_rd_models));
+  // Don't copy in row_mt case, otherwise run into data race. No behavior change
+  // in row_mt case.
+  if (cpi->sf.inter_sf.inter_mode_rd_model_estimation == 1) {
+    memcpy(sb_fp_stats->inter_mode_rd_models, tile_data->inter_mode_rd_models,
+           sizeof(sb_fp_stats->inter_mode_rd_models));
+  }
 
   memcpy(sb_fp_stats->thresh_freq_fact, x->thresh_freq_fact,
          sizeof(sb_fp_stats->thresh_freq_fact));
@@ -1590,8 +1577,11 @@ void av1_restore_sb_state(const SB_FIRST_PASS_STATS *sb_fp_stats, AV1_COMP *cpi,
 
   *td->counts = sb_fp_stats->fc;
 
-  memcpy(tile_data->inter_mode_rd_models, sb_fp_stats->inter_mode_rd_models,
-         sizeof(sb_fp_stats->inter_mode_rd_models));
+  if (cpi->sf.inter_sf.inter_mode_rd_model_estimation == 1) {
+    memcpy(tile_data->inter_mode_rd_models, sb_fp_stats->inter_mode_rd_models,
+           sizeof(sb_fp_stats->inter_mode_rd_models));
+  }
+
   memcpy(x->thresh_freq_fact, sb_fp_stats->thresh_freq_fact,
          sizeof(sb_fp_stats->thresh_freq_fact));
 

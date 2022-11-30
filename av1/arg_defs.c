@@ -755,5 +755,9 @@ const av1_codec_arg_definitions_t g_av1_codec_arg_defs = {
   .tpl_rd_mult = ARG_DEF(NULL, "tpl-rd-mult", 1,
                        "Multiplier for tpl rdmult "
                                   "(Meant for hyper-tuning, defaults to 100)"),
+  .sb_qp_sweep =
+      ARG_DEF(NULL, "sb-qp-sweep", 1,
+              "When set to 1, enable the superblock level qp sweep for a "
+              "given lambda to minimize the rdcost."),
 #endif  // CONFIG_AV1_ENCODER
 };

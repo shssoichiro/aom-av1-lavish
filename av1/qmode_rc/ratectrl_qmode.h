@@ -14,6 +14,7 @@
 
 #include <deque>
 #include <queue>
+#include <unordered_map>
 #include <vector>
 #include "av1/encoder/firstpass.h"
 #include "av1/qmode_rc/ratectrl_qmode_interface.h"
@@ -35,6 +36,7 @@ struct TplUnitDepStats {
 
 struct TplFrameDepStats {
   int unit_size;  // equivalent to min_block_size
+  double rdcost;  // overall rate-distortion cost
   std::vector<std::vector<TplUnitDepStats>> unit_stats;
 };
 
@@ -77,6 +79,9 @@ std::vector<int> GetKeyFrameList(const FirstpassInfo &first_pass_info);
 double TplFrameDepStatsAccumulateIntraCost(
     const TplFrameDepStats &frame_dep_stats);
 
+double TplFrameDepStatsAccumulateInterCost(
+    const TplFrameDepStats &frame_dep_stats);
+
 double TplFrameDepStatsAccumulate(const TplFrameDepStats &frame_dep_stats);
 
 void TplFrameDepStatsPropagate(int coding_idx,
@@ -84,6 +89,10 @@ void TplFrameDepStatsPropagate(int coding_idx,
                                TplGopDepStats *tpl_gop_dep_stats);
 
 int GetBlockOverlapArea(int r0, int c0, int r1, int c1, int size);
+
+namespace internal {
+std::unordered_map<int, int> KMeans(std::vector<uint8_t> qindices, int k);
+}
 
 StatusOr<TplGopDepStats> ComputeTplGopDepStats(
     const TplGopStats &tpl_gop_stats,
@@ -99,6 +108,8 @@ class AV1RateControlQMode : public AV1RateControlQModeInterface {
       const GopStruct &gop_struct, const TplGopStats &tpl_gop_stats,
       const std::vector<LookaheadStats> &lookahead_stats,
       const RefFrameTable &ref_frame_table_snapshot) override;
+  StatusOr<GopEncodeInfo> GetTplPassGopEncodeInfo(
+      const GopStruct &gop_struct) override;
 
   // Public for testing only.
   // Returns snapshots of the ref frame before and after each frame in

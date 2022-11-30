@@ -76,6 +76,7 @@ list(APPEND AOM_UNIT_TEST_ENCODER_SOURCES
             "${AOM_ROOT}/test/level_test.cc"
             "${AOM_ROOT}/test/metadata_test.cc"
             "${AOM_ROOT}/test/monochrome_test.cc"
+            "${AOM_ROOT}/test/postproc_filters_test.cc"
             "${AOM_ROOT}/test/resize_test.cc"
             "${AOM_ROOT}/test/scalability_test.cc"
             "${AOM_ROOT}/test/sharpness_test.cc"
@@ -116,6 +117,7 @@ if(CONFIG_REALTIME_ONLY)
                    "${AOM_ROOT}/test/level_test.cc"
                    "${AOM_ROOT}/test/metadata_test.cc"
                    "${AOM_ROOT}/test/monochrome_test.cc"
+                   "${AOM_ROOT}/test/postproc_filters_test.cc"
                    "${AOM_ROOT}/test/sharpness_test.cc")
 endif()
 
@@ -231,6 +233,7 @@ if(NOT BUILD_SHARED_LIBS)
                 "${AOM_ROOT}/test/ratectrl_test.cc"
                 "${AOM_ROOT}/test/rd_test.cc"
                 "${AOM_ROOT}/test/sb_multipass_test.cc"
+                "${AOM_ROOT}/test/sb_qp_sweep_test.cc"
                 "${AOM_ROOT}/test/screen_content_test.cc"
                 "${AOM_ROOT}/test/segment_binarization_sync.cc"
                 "${AOM_ROOT}/test/still_picture_test.cc"
@@ -253,6 +256,7 @@ if(NOT BUILD_SHARED_LIBS)
                        "${AOM_ROOT}/test/kf_test.cc"
                        "${AOM_ROOT}/test/lossless_test.cc"
                        "${AOM_ROOT}/test/sb_multipass_test.cc"
+                       "${AOM_ROOT}/test/sb_qp_sweep_test.cc"
                        "${AOM_ROOT}/test/selfguided_filter_test.cc"
                        "${AOM_ROOT}/test/screen_content_test.cc"
                        "${AOM_ROOT}/test/still_picture_test.cc"
