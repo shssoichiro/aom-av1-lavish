@@ -561,13 +561,13 @@ typedef struct {
   int drop_frames_water_mark;
   /*!
    * under_shoot_pct indicates the tolerance of the VBR algorithm to
-   * undershoot and is used as a trigger threshold for more agressive
+   * undershoot and is used as a trigger threshold for more aggressive
    * adaptation of Q. It's value can range from 0-100.
    */
   int under_shoot_pct;
   /*!
    * over_shoot_pct indicates the tolerance of the VBR algorithm to overshoot
-   * and is used as a trigger threshold for more agressive adaptation of Q.
+   * and is used as a trigger threshold for more aggressive adaptation of Q.
    * It's value can range from 0-1000.
    */
   int over_shoot_pct;
@@ -859,6 +859,12 @@ typedef struct {
    * 3: Loop filter is disables for the frames with low motion
    */
   LOOPFILTER_CONTROL loopfilter_control;
+
+  /*!
+   * Indicates if the application of post-processing filters should be skipped
+   * on reconstructed frame.
+   */
+  bool skip_postproc_filtering;
 } AlgoCfg;
 /*!\cond */
 
@@ -1416,12 +1422,6 @@ typedef struct {
    * encoding in the ith superblock row.
    */
   int *num_finished_cols;
-  /*!
-   * Buffer to store the mi position of the block whose encoding is complete.
-   * finished_block_in_mi[i] stores the mi position of the block which finished
-   * encoding in the ith superblock row.
-   */
-  int *finished_block_in_mi;
   /*!
    * Denotes the superblock interval at which conditional signalling should
    * happen. Also denotes the minimum number of extra superblocks of the top row
@@ -3469,6 +3469,11 @@ typedef struct AV1_COMP {
    * Struct for the reference structure for RTC.
    */
   RTC_REF rtc_ref;
+
+  /*!
+   * Block level thresholds to force zeromv-skip at partition level.
+   */
+  unsigned int zeromv_skip_thresh_exit_part[BLOCK_SIZES_ALL];
 } AV1_COMP;
 
 /*!
@@ -3816,8 +3821,10 @@ static INLINE void alloc_frame_mvs(AV1_COMMON *const cm, RefCntBuffer *buf) {
 // the frame token allocation.
 static INLINE unsigned int allocated_tokens(const TileInfo *tile,
                                             int sb_size_log2, int num_planes) {
-  int tile_mb_rows = (tile->mi_row_end - tile->mi_row_start + 2) >> 2;
-  int tile_mb_cols = (tile->mi_col_end - tile->mi_col_start + 2) >> 2;
+  int tile_mb_rows =
+      ROUND_POWER_OF_TWO(tile->mi_row_end - tile->mi_row_start, 2);
+  int tile_mb_cols =
+      ROUND_POWER_OF_TWO(tile->mi_col_end - tile->mi_col_start, 2);
 
   return get_token_alloc(tile_mb_rows, tile_mb_cols, sb_size_log2, num_planes);
 }
@@ -3955,12 +3962,12 @@ void av1_setup_frame_size(AV1_COMP *cpi);
 
 // Returns 1 if a frame is scaled and 0 otherwise.
 static INLINE int av1_resize_scaled(const AV1_COMMON *cm) {
-  return !(cm->superres_upscaled_width == cm->render_width &&
-           cm->superres_upscaled_height == cm->render_height);
+  return cm->superres_upscaled_width != cm->render_width ||
+         cm->superres_upscaled_height != cm->render_height;
 }
 
 static INLINE int av1_frame_scaled(const AV1_COMMON *cm) {
-  return !av1_superres_scaled(cm) && av1_resize_scaled(cm);
+  return av1_superres_scaled(cm) || av1_resize_scaled(cm);
 }
 
 // Don't allow a show_existing_frame to coincide with an error resilient
@@ -4125,6 +4132,12 @@ static INLINE int is_frame_resize_pending(const AV1_COMP *const cpi) {
            cpi->common.height != resize_pending_params->height));
 }
 
+// Check if CDEF is used.
+static INLINE int is_cdef_used(const AV1_COMMON *const cm) {
+  return cm->seq_params->enable_cdef && !cm->features.coded_lossless &&
+         !cm->tiles.large_scale;
+}
+
 // Check if loop restoration filter is used.
 static INLINE int is_restoration_used(const AV1_COMMON *const cm) {
   return cm->seq_params->enable_restoration && !cm->features.all_lossless &&
@@ -4135,6 +4148,12 @@ static INLINE int is_inter_tx_size_search_level_one(
     const TX_SPEED_FEATURES *tx_sf) {
   return (tx_sf->inter_tx_size_search_init_depth_rect >= 1 &&
           tx_sf->inter_tx_size_search_init_depth_sqr >= 1);
+}
+
+// Enable switchable motion mode only if warp and OBMC tools are allowed
+static INLINE bool is_switchable_motion_mode_allowed(bool allow_warped_motion,
+                                                     bool enable_obmc) {
+  return (allow_warped_motion || enable_obmc);
 }
 
 #if CONFIG_AV1_TEMPORAL_DENOISING

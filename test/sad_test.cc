@@ -711,6 +711,7 @@ TEST_P(SADTest, ShortSrc) {
     FillRandom(source_data_, source_stride_);
     FillRandom(reference_data_, reference_stride_);
     CheckSAD();
+    if (testing::Test::HasFatalFailure()) break;
     test_count -= 1;
   }
   source_stride_ = tmp_stride;
@@ -765,6 +766,7 @@ TEST_P(SADSkipTest, ShortSrc) {
     FillRandom(source_data_, source_stride_);
     FillRandom(reference_data_, reference_stride_);
     CheckSAD();
+    if (testing::Test::HasFatalFailure()) break;
     test_count -= 1;
   }
   source_stride_ = tmp_stride;
@@ -823,6 +825,7 @@ TEST_P(SADavgTest, ShortSrc) {
     FillRandom(reference_data_, reference_stride_);
     FillRandom(second_pred_, width_);
     CheckSAD();
+    if (testing::Test::HasFatalFailure()) break;
     test_count -= 1;
   }
   source_stride_ = tmp_stride;
@@ -900,6 +903,7 @@ TEST_P(DistWtdSADTest, ShortSrc) {
     FillRandom(source_data_, source_stride_);
     FillRandom(reference_data_, reference_stride_);
     CheckSAD();
+    if (testing::Test::HasFatalFailure()) break;
     test_count -= 1;
   }
   source_stride_ = tmp_stride;
@@ -949,6 +953,7 @@ TEST_P(DistWtdSADavgTest, ShortSrc) {
     FillRandom(reference_data_, reference_stride_);
     FillRandom(second_pred_, width_);
     CheckSAD();
+    if (testing::Test::HasFatalFailure()) break;
     test_count -= 1;
   }
   source_stride_ = tmp_stride;
@@ -2804,60 +2809,5 @@ const SadMxNx4Param x4d_avx2_tests[] = {
 };
 INSTANTIATE_TEST_SUITE_P(AVX2, SADx4Test, ::testing::ValuesIn(x4d_avx2_tests));
 #endif  // HAVE_AVX2
-
-//------------------------------------------------------------------------------
-// MIPS functions
-#if HAVE_MSA
-const SadMxNParam msa_tests[] = {
-  make_tuple(64, 64, &aom_sad64x64_msa, -1),
-  make_tuple(64, 32, &aom_sad64x32_msa, -1),
-  make_tuple(32, 64, &aom_sad32x64_msa, -1),
-  make_tuple(32, 32, &aom_sad32x32_msa, -1),
-  make_tuple(32, 16, &aom_sad32x16_msa, -1),
-  make_tuple(16, 32, &aom_sad16x32_msa, -1),
-  make_tuple(16, 16, &aom_sad16x16_msa, -1),
-  make_tuple(16, 8, &aom_sad16x8_msa, -1),
-  make_tuple(8, 16, &aom_sad8x16_msa, -1),
-  make_tuple(8, 8, &aom_sad8x8_msa, -1),
-  make_tuple(8, 4, &aom_sad8x4_msa, -1),
-  make_tuple(4, 8, &aom_sad4x8_msa, -1),
-  make_tuple(4, 4, &aom_sad4x4_msa, -1),
-};
-INSTANTIATE_TEST_SUITE_P(MSA, SADTest, ::testing::ValuesIn(msa_tests));
-
-const SadMxNAvgParam avg_msa_tests[] = {
-  make_tuple(64, 64, &aom_sad64x64_avg_msa, -1),
-  make_tuple(64, 32, &aom_sad64x32_avg_msa, -1),
-  make_tuple(32, 64, &aom_sad32x64_avg_msa, -1),
-  make_tuple(32, 32, &aom_sad32x32_avg_msa, -1),
-  make_tuple(32, 16, &aom_sad32x16_avg_msa, -1),
-  make_tuple(16, 32, &aom_sad16x32_avg_msa, -1),
-  make_tuple(16, 16, &aom_sad16x16_avg_msa, -1),
-  make_tuple(16, 8, &aom_sad16x8_avg_msa, -1),
-  make_tuple(8, 16, &aom_sad8x16_avg_msa, -1),
-  make_tuple(8, 8, &aom_sad8x8_avg_msa, -1),
-  make_tuple(8, 4, &aom_sad8x4_avg_msa, -1),
-  make_tuple(4, 8, &aom_sad4x8_avg_msa, -1),
-  make_tuple(4, 4, &aom_sad4x4_avg_msa, -1),
-};
-INSTANTIATE_TEST_SUITE_P(MSA, SADavgTest, ::testing::ValuesIn(avg_msa_tests));
-
-const SadMxNx4Param x4d_msa_tests[] = {
-  make_tuple(64, 64, &aom_sad64x64x4d_msa, -1),
-  make_tuple(64, 32, &aom_sad64x32x4d_msa, -1),
-  make_tuple(32, 64, &aom_sad32x64x4d_msa, -1),
-  make_tuple(32, 32, &aom_sad32x32x4d_msa, -1),
-  make_tuple(32, 16, &aom_sad32x16x4d_msa, -1),
-  make_tuple(16, 32, &aom_sad16x32x4d_msa, -1),
-  make_tuple(16, 16, &aom_sad16x16x4d_msa, -1),
-  make_tuple(16, 8, &aom_sad16x8x4d_msa, -1),
-  make_tuple(8, 16, &aom_sad8x16x4d_msa, -1),
-  make_tuple(8, 8, &aom_sad8x8x4d_msa, -1),
-  make_tuple(8, 4, &aom_sad8x4x4d_msa, -1),
-  make_tuple(4, 8, &aom_sad4x8x4d_msa, -1),
-  make_tuple(4, 4, &aom_sad4x4x4d_msa, -1),
-};
-INSTANTIATE_TEST_SUITE_P(MSA, SADx4Test, ::testing::ValuesIn(x4d_msa_tests));
-#endif  // HAVE_MSA
 
 }  // namespace

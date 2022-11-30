@@ -447,8 +447,9 @@ static int adjust_q_cbr(const AV1_COMP *cpi, int q, int active_worst_quality) {
   const PRIMARY_RATE_CONTROL *const p_rc = &cpi->ppi->p_rc;
   const AV1_COMMON *const cm = &cpi->common;
   const RefreshFrameInfo *const refresh_frame = &cpi->refresh_frame;
-  const int max_delta_down =
-      (cpi->oxcf.tune_cfg.content == AOM_CONTENT_SCREEN) ? 8 : 16;
+  const int max_delta_down = (cpi->oxcf.tune_cfg.content == AOM_CONTENT_SCREEN)
+                                 ? AOMMIN(8, AOMMAX(1, rc->q_1_frame / 16))
+                                 : AOMMIN(16, AOMMAX(1, rc->q_1_frame / 8));
   const int max_delta_up = 20;
   const int change_avg_frame_bandwidth =
       abs(rc->avg_frame_bandwidth - rc->prev_avg_frame_bandwidth) >
@@ -2770,7 +2771,8 @@ static void rc_scene_detection_onepass_rt(AV1_COMP *cpi,
     return;
   }
   rc->high_source_sad = 0;
-  rc->high_num_blocks_with_motion = 0;
+  rc->percent_blocks_with_motion = 0;
+  rc->max_block_source_sad = 0;
   rc->prev_avg_source_sad = rc->avg_source_sad;
   if (src_width == last_src_width && src_height == last_src_height) {
     const int num_mi_cols = cm->mi_params.mi_cols;
@@ -2779,7 +2781,6 @@ static void rc_scene_detection_onepass_rt(AV1_COMP *cpi,
     uint32_t min_thresh = 10000;
     if (cpi->oxcf.tune_cfg.content != AOM_CONTENT_SCREEN) min_thresh = 100000;
     const BLOCK_SIZE bsize = BLOCK_64X64;
-    int full_sampling = (cm->width * cm->height < 640 * 360) ? 1 : 0;
     // Loop over sub-sample of frame, compute average sad over 64x64 blocks.
     uint64_t avg_sad = 0;
     uint64_t tmp_sad = 0;
@@ -2799,7 +2800,6 @@ static void rc_scene_detection_onepass_rt(AV1_COMP *cpi,
     // Store blkwise SAD for later use
     if ((cm->spatial_layer_id == 0) && (cm->width == cm->render_width) &&
         (cm->height == cm->render_height)) {
-      full_sampling = 1;
       if (cpi->src_sad_blk_64x64 == NULL) {
         CHECK_MEM_ERROR(
             cm, cpi->src_sad_blk_64x64,
@@ -2809,30 +2809,26 @@ static void rc_scene_detection_onepass_rt(AV1_COMP *cpi,
     }
     for (int sbi_row = 0; sbi_row < sb_rows; ++sbi_row) {
       for (int sbi_col = 0; sbi_col < sb_cols; ++sbi_col) {
-        // Checker-board pattern, ignore boundary.
-        if (full_sampling ||
-            ((sbi_row > 0 && sbi_col > 0) &&
-             (sbi_row < sb_rows - 1 && sbi_col < sb_cols - 1) &&
-             ((sbi_row % 2 == 0 && sbi_col % 2 == 0) ||
-              (sbi_row % 2 != 0 && sbi_col % 2 != 0)))) {
-          tmp_sad = cpi->ppi->fn_ptr[bsize].sdf(src_y, src_ystride, last_src_y,
-                                                last_src_ystride);
-          if (cpi->src_sad_blk_64x64 != NULL)
-            cpi->src_sad_blk_64x64[sbi_col + sbi_row * sb_cols] = tmp_sad;
-          if (check_light_change) {
-            unsigned int sse, variance;
-            variance = cpi->ppi->fn_ptr[bsize].vf(
-                src_y, src_ystride, last_src_y, last_src_ystride, &sse);
-            // Note: sse - variance = ((sum * sum) >> 12)
-            // Detect large lighting change.
-            if (variance < (sse >> 1) && (sse - variance) > sum_sq_thresh) {
-              num_low_var_high_sumdiff++;
-            }
+        tmp_sad = cpi->ppi->fn_ptr[bsize].sdf(src_y, src_ystride, last_src_y,
+                                              last_src_ystride);
+        if (cpi->src_sad_blk_64x64 != NULL)
+          cpi->src_sad_blk_64x64[sbi_col + sbi_row * sb_cols] = tmp_sad;
+        if (check_light_change) {
+          unsigned int sse, variance;
+          variance = cpi->ppi->fn_ptr[bsize].vf(src_y, src_ystride, last_src_y,
+                                                last_src_ystride, &sse);
+          // Note: sse - variance = ((sum * sum) >> 12)
+          // Detect large lighting change.
+          if (variance < (sse >> 1) && (sse - variance) > sum_sq_thresh) {
+            num_low_var_high_sumdiff++;
           }
-          avg_sad += tmp_sad;
-          num_samples++;
-          if (tmp_sad == 0) num_zero_temp_sad++;
         }
+        avg_sad += tmp_sad;
+        num_samples++;
+        if (tmp_sad == 0) num_zero_temp_sad++;
+        if (tmp_sad > rc->max_block_source_sad)
+          rc->max_block_source_sad = tmp_sad;
+
         src_y += 64;
         last_src_y += 64;
       }
@@ -2857,9 +2853,9 @@ static void rc_scene_detection_onepass_rt(AV1_COMP *cpi,
       rc->high_source_sad = 0;
     rc->avg_source_sad = (3 * rc->avg_source_sad + avg_sad) >> 2;
     rc->frame_source_sad = avg_sad;
-
-    if (num_zero_temp_sad < (3 * num_samples >> 2))
-      rc->high_num_blocks_with_motion = 1;
+    if (num_samples > 0)
+      rc->percent_blocks_with_motion =
+          ((num_samples - num_zero_temp_sad) * 100) / num_samples;
   }
   cpi->svc.high_source_sad_superframe = rc->high_source_sad;
 }

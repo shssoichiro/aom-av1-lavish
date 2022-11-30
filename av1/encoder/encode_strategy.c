@@ -843,8 +843,7 @@ static int denoise_and_encode(AV1_COMP *const cpi, uint8_t *const dest,
   cm->show_frame = frame_params->show_frame;
   cm->current_frame.frame_type = frame_params->frame_type;
   // TODO(bohanli): Why is this? what part of it is necessary?
-  av1_set_frame_size(cpi, cm->superres_upscaled_width,
-                     cm->superres_upscaled_height);
+  av1_set_frame_size(cpi, cm->width, cm->height);
   if (set_mv_params) av1_set_mv_search_params(cpi);
 
 #if CONFIG_RD_COMMAND
@@ -1464,11 +1463,13 @@ int av1_encode_strategy(AV1_COMP *const cpi, size_t *const size,
   // this parameter should be used with caution.
   frame_params.speed = oxcf->speed;
 
-  // Work out some encoding parameters specific to the pass:
-  if (has_no_stats_stage(cpi) && oxcf->q_cfg.aq_mode == CYCLIC_REFRESH_AQ) {
-    av1_cyclic_refresh_update_parameters(cpi);
-  } else if (is_stat_generation_stage(cpi)) {
-    cpi->td.mb.e_mbd.lossless[0] = is_lossless_requested(&oxcf->rc_cfg);
+#if !CONFIG_REALTIME_ONLY
+  // Set forced key frames when necessary. For two-pass encoding / lap mode,
+  // this is already handled by av1_get_second_pass_params. However when no
+  // stats are available, we still need to check if the new frame is a keyframe.
+  // For one pass rt, this is already checked in av1_get_one_pass_rt_params.
+  if (!use_one_pass_rt_params &&
+      (is_stat_generation_stage(cpi) || has_no_stats_stage(cpi))) {
     // Current frame is coded as a key-frame for any of the following cases:
     // 1) First frame of a video
     // 2) For all-intra frame encoding
@@ -1479,9 +1480,18 @@ int av1_encode_strategy(AV1_COMP *const cpi, size_t *const size,
     if (kf_requested && frame_update_type != OVERLAY_UPDATE &&
         frame_update_type != INTNL_OVERLAY_UPDATE) {
       frame_params.frame_type = KEY_FRAME;
-    } else {
+    } else if (is_stat_generation_stage(cpi)) {
+      // For stats generation, set the frame type to inter here.
       frame_params.frame_type = INTER_FRAME;
     }
+  }
+#endif
+
+  // Work out some encoding parameters specific to the pass:
+  if (has_no_stats_stage(cpi) && oxcf->q_cfg.aq_mode == CYCLIC_REFRESH_AQ) {
+    av1_cyclic_refresh_update_parameters(cpi);
+  } else if (is_stat_generation_stage(cpi)) {
+    cpi->td.mb.e_mbd.lossless[0] = is_lossless_requested(&oxcf->rc_cfg);
   } else if (is_stat_consumption_stage(cpi)) {
 #if CONFIG_MISMATCH_DEBUG
     mismatch_move_frame_idx_w();

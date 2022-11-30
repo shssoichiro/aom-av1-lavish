@@ -591,8 +591,6 @@ static void init_config(struct AV1_COMP *cpi, const AV1EncoderConfig *oxcf) {
 
   alloc_compressor_data(cpi);
 
-  av1_update_film_grain_parameters(cpi, oxcf);
-
   // Single thread case: use counts in common.
   cpi->td.counts = &cpi->counts;
 
@@ -716,6 +714,7 @@ void av1_change_config(struct AV1_COMP *cpi, const AV1EncoderConfig *oxcf,
   RefreshFrameInfo *const refresh_frame = &cpi->refresh_frame;
   const FrameDimensionCfg *const frm_dim_cfg = &cpi->oxcf.frm_dim_cfg;
   const RateControlCfg *const rc_cfg = &oxcf->rc_cfg;
+  FeatureFlags *const features = &cm->features;
 
   // in case of LAP, lag in frames is set according to number of lap buffers
   // calculated at init time. This stores and restores LAP's lag in frames to
@@ -725,9 +724,10 @@ void av1_change_config(struct AV1_COMP *cpi, const AV1EncoderConfig *oxcf,
     lap_lag_in_frames = cpi->oxcf.gf_cfg.lag_in_frames;
   }
 
+  cpi->oxcf = *oxcf;
+
   av1_update_film_grain_parameters(cpi, oxcf);
 
-  cpi->oxcf = *oxcf;
   // When user provides superres_mode = AOM_SUPERRES_AUTO, we still initialize
   // superres mode for current encoding = AOM_SUPERRES_NONE. This is to ensure
   // that any analysis (e.g. TPL) happening outside the main encoding loop still
@@ -770,12 +770,12 @@ void av1_change_config(struct AV1_COMP *cpi, const AV1EncoderConfig *oxcf,
   refresh_frame->golden_frame = false;
   refresh_frame->bwd_ref_frame = false;
 
-  cm->features.refresh_frame_context =
+  features->refresh_frame_context =
       (oxcf->tool_cfg.frame_parallel_decoding_mode)
           ? REFRESH_FRAME_CONTEXT_DISABLED
           : REFRESH_FRAME_CONTEXT_BACKWARD;
   if (oxcf->tile_cfg.enable_large_scale_tile)
-    cm->features.refresh_frame_context = REFRESH_FRAME_CONTEXT_DISABLED;
+    features->refresh_frame_context = REFRESH_FRAME_CONTEXT_DISABLED;
 
   if (x->palette_buffer == NULL) {
     CHECK_MEM_ERROR(cm, x->palette_buffer,
@@ -823,9 +823,10 @@ void av1_change_config(struct AV1_COMP *cpi, const AV1EncoderConfig *oxcf,
   rc->worst_quality = rc_cfg->worst_allowed_q;
   rc->best_quality = rc_cfg->best_allowed_q;
 
-  cm->features.interp_filter =
+  features->interp_filter =
       oxcf->tile_cfg.enable_large_scale_tile ? EIGHTTAP_REGULAR : SWITCHABLE;
-  cm->features.switchable_motion_mode = 1;
+  features->switchable_motion_mode = is_switchable_motion_mode_allowed(
+      features->allow_warped_motion, oxcf->motion_mode_cfg.enable_obmc);
 
   if (frm_dim_cfg->render_width > 0 && frm_dim_cfg->render_height > 0) {
     cm->render_width = frm_dim_cfg->render_width;
@@ -1263,13 +1264,14 @@ AV1_COMP *av1_create_compressor(AV1_PRIMARY *ppi, const AV1EncoderConfig *oxcf,
                                 BufferPool *const pool, COMPRESSOR_STAGE stage,
                                 int lap_lag_in_frames) {
   AV1_COMP *volatile const cpi = aom_memalign(32, sizeof(AV1_COMP));
-  AV1_COMMON *volatile const cm = cpi != NULL ? &cpi->common : NULL;
 
-  if (!cm) return NULL;
+  if (!cpi) return NULL;
 
   av1_zero(*cpi);
 
   cpi->ppi = ppi;
+
+  AV1_COMMON *volatile const cm = &cpi->common;
   cm->seq_params = &ppi->seq_params;
   cm->error =
       (struct aom_internal_error_info *)aom_calloc(1, sizeof(*cm->error));
@@ -1388,8 +1390,17 @@ AV1_COMP *av1_create_compressor(AV1_PRIMARY *ppi, const AV1EncoderConfig *oxcf,
   av1_set_speed_features_framesize_independent(cpi, oxcf->speed);
   av1_set_speed_features_framesize_dependent(cpi, oxcf->speed);
 
+  int max_mi_cols = mi_params->mi_cols;
+  int max_mi_rows = mi_params->mi_rows;
+  if (oxcf->frm_dim_cfg.forced_max_frame_width) {
+    max_mi_cols = size_in_mi(oxcf->frm_dim_cfg.forced_max_frame_width);
+  }
+  if (oxcf->frm_dim_cfg.forced_max_frame_height) {
+    max_mi_rows = size_in_mi(oxcf->frm_dim_cfg.forced_max_frame_height);
+  }
+
   CHECK_MEM_ERROR(cm, cpi->consec_zero_mv,
-                  aom_calloc((mi_params->mi_rows * mi_params->mi_cols) >> 2,
+                  aom_calloc((max_mi_rows * max_mi_cols) >> 2,
                              sizeof(*cpi->consec_zero_mv)));
 
   cpi->mb_weber_stats = NULL;
@@ -1399,8 +1410,8 @@ AV1_COMP *av1_create_compressor(AV1_PRIMARY *ppi, const AV1EncoderConfig *oxcf,
     const int bsize = BLOCK_16X16;
     const int w = mi_size_wide[bsize];
     const int h = mi_size_high[bsize];
-    const int num_cols = (mi_params->mi_cols + w - 1) / w;
-    const int num_rows = (mi_params->mi_rows + h - 1) / h;
+    const int num_cols = (max_mi_cols + w - 1) / w;
+    const int num_rows = (max_mi_rows + h - 1) / h;
     CHECK_MEM_ERROR(cm, cpi->ssim_rdmult_scaling_factors,
                     aom_calloc(num_rows * num_cols,
                                sizeof(*cpi->ssim_rdmult_scaling_factors)));
@@ -2173,8 +2184,26 @@ void av1_set_frame_size(AV1_COMP *cpi, int width, int height) {
   set_ref_ptrs(cm, xd, LAST_FRAME, LAST_FRAME);
 }
 
-static INLINE int do_extend_borders_with_cdef_mt(AV1_COMMON *cm) {
-  return (!is_restoration_used(cm) && !av1_superres_scaled(cm));
+static INLINE int extend_borders_mt(const AV1_COMP *cpi,
+                                    MULTI_THREADED_MODULES stage, int plane) {
+  const AV1_COMMON *const cm = &cpi->common;
+  if (cpi->mt_info.num_mod_workers[stage] < 2) return 0;
+  switch (stage) {
+    // TODO(deepa.kg@ittiam.com): When cdef and loop-restoration are disabled,
+    // multi-thread frame border extension along with loop filter frame.
+    // As loop-filtering of a superblock row modifies the pixels of the
+    // above superblock row, border extension requires that loop filtering
+    // of the current and above superblock row is complete.
+    case MOD_LPF: return 0;
+    case MOD_CDEF:
+      return is_cdef_used(cm) && !cpi->rtc_ref.non_reference_frame &&
+             !is_restoration_used(cm) && !av1_superres_scaled(cm);
+    case MOD_LR:
+      return is_restoration_used(cm) &&
+             (cm->rst_info[plane].frame_restoration_type != RESTORE_NONE);
+    default: assert(0);
+  }
+  return 0;
 }
 
 /*!\brief Select and apply cdef filters and switchable restoration filters
@@ -2210,7 +2239,9 @@ static void cdef_restoration_frame(AV1_COMP *cpi, AV1_COMMON *cm,
     // Apply the filter
     if (!cpi->rtc_ref.non_reference_frame) {
       if (num_workers > 1) {
-        const int do_extend_border = do_extend_borders_with_cdef_mt(cm);
+        // Extension of frame borders is multi-threaded along with cdef.
+        const int do_extend_border =
+            extend_borders_mt(cpi, MOD_CDEF, /* plane */ 0);
         av1_cdef_frame_mt(cm, xd, cpi->mt_info.cdef_worker,
                           cpi->mt_info.workers, &cpi->mt_info.cdef_sync,
                           num_workers, av1_cdef_init_fb_row_mt,
@@ -2222,11 +2253,6 @@ static void cdef_restoration_frame(AV1_COMP *cpi, AV1_COMMON *cm,
 #if CONFIG_COLLECT_COMPONENT_TIMING
     end_timing(cpi, cdef_time);
 #endif
-  } else {
-    cm->cdef_info.cdef_bits = 0;
-    cm->cdef_info.cdef_strengths[0] = 0;
-    cm->cdef_info.nb_cdef_strengths = 1;
-    cm->cdef_info.cdef_uv_strengths[0] = 0;
   }
 
   av1_superres_post_encode(cpi);
@@ -2244,6 +2270,8 @@ static void cdef_restoration_frame(AV1_COMP *cpi, AV1_COMMON *cm,
         cm->rst_info[1].frame_restoration_type != RESTORE_NONE ||
         cm->rst_info[2].frame_restoration_type != RESTORE_NONE) {
       if (num_workers > 1) {
+        // Extension of frame borders is multi-threaded along with loop
+        // restoration filter.
         const int do_extend_border = 1;
         av1_loop_restoration_filter_frame_mt(
             &cm->cur_frame->buf, cm, 0, mt_info->workers, num_workers,
@@ -2253,10 +2281,6 @@ static void cdef_restoration_frame(AV1_COMP *cpi, AV1_COMMON *cm,
                                           &cpi->lr_ctxt);
       }
     }
-  } else {
-    cm->rst_info[0].frame_restoration_type = RESTORE_NONE;
-    cm->rst_info[1].frame_restoration_type = RESTORE_NONE;
-    cm->rst_info[2].frame_restoration_type = RESTORE_NONE;
   }
 #if CONFIG_COLLECT_COMPONENT_TIMING
   end_timing(cpi, loop_restoration_time);
@@ -2264,8 +2288,61 @@ static void cdef_restoration_frame(AV1_COMP *cpi, AV1_COMMON *cm,
 #endif  // !CONFIG_REALTIME_ONLY
 }
 
-/*!\brief Select and apply in-loop deblocking filters, cdef filters, and
- * restoration filters
+static void extend_frame_borders(AV1_COMP *cpi) {
+  const AV1_COMMON *const cm = &cpi->common;
+  // TODO(debargha): Fix mv search range on encoder side
+  for (int plane = 0; plane < av1_num_planes(cm); ++plane) {
+    const bool extend_border_done = extend_borders_mt(cpi, MOD_CDEF, plane) ||
+                                    extend_borders_mt(cpi, MOD_LR, plane);
+    if (!extend_border_done) {
+      const YV12_BUFFER_CONFIG *const ybf = &cm->cur_frame->buf;
+      aom_extend_frame_borders_plane_row(ybf, plane, 0,
+                                         ybf->crop_heights[plane > 0]);
+    }
+  }
+}
+
+static void set_postproc_filter_default_params(AV1_COMMON *cm) {
+  struct loopfilter *const lf = &cm->lf;
+  CdefInfo *const cdef_info = &cm->cdef_info;
+  RestorationInfo *const rst_info = cm->rst_info;
+
+  lf->filter_level[0] = 0;
+  lf->filter_level[1] = 0;
+  cdef_info->cdef_bits = 0;
+  cdef_info->cdef_strengths[0] = 0;
+  cdef_info->nb_cdef_strengths = 1;
+  cdef_info->cdef_uv_strengths[0] = 0;
+  rst_info[0].frame_restoration_type = RESTORE_NONE;
+  rst_info[1].frame_restoration_type = RESTORE_NONE;
+  rst_info[2].frame_restoration_type = RESTORE_NONE;
+}
+
+// Checks if post-processing filters need to be applied.
+// NOTE: This function decides if the application of different post-processing
+// filters on the reconstructed frame can be skipped at the encoder side.
+// However the computation of different filter parameters that are signaled in
+// the bitstream is still required.
+static bool should_skip_postproc_filtering(AV1_COMP *cpi, int use_cdef,
+                                           int use_restoration) {
+  if (!cpi->oxcf.algo_cfg.skip_postproc_filtering || cpi->ppi->b_calculate_psnr)
+    return false;
+  assert(cpi->oxcf.mode == ALLINTRA);
+  const AV1_COMMON *const cm = &cpi->common;
+
+  // The post-processing filters are applied one after the other. In case of
+  // ALLINTRA encoding, the reconstructed frame is not used as a reference
+  // frame. Hence, the application of these filters can be skipped when
+  // 1. filter parameters of the subsequent stages are not dependent on the
+  // filtered output of the current stage or
+  // 2. subsequent filtering stages are disabled
+  // Hence, the application of deblocking filters is also skipped if there are
+  // no further filtering stages.
+  return (!use_cdef && !av1_superres_scaled(cm) && !use_restoration);
+}
+
+/*!\brief Select and apply deblocking filters, cdef filters, and restoration
+ * filters.
  *
  * \ingroup high_level_algo
  */
@@ -2280,48 +2357,36 @@ static void loopfilter_frame(AV1_COMP *cpi, AV1_COMMON *cm) {
 
   const int use_loopfilter =
       !cm->features.coded_lossless && !cm->tiles.large_scale;
-  const int use_cdef = cm->seq_params->enable_cdef &&
-                       !cm->features.coded_lossless && !cm->tiles.large_scale;
+  const int use_cdef = is_cdef_used(cm);
   const int use_restoration = is_restoration_used(cm);
-
-  // TODO(deepa.kg@ittiam.com): When cdef and loop-restoration are disabled,
-  // multi-thread frame border extension along with loop filter frame.
-  // As loop-filtering of a superblock row modifies the pixels of the
-  // above superblock row, border extension requires that loop filtering
-  // of the current and above superblock row is complete.
-  for (int plane = 0; plane < num_planes; plane++)
-    cm->extend_border_mt[plane] = 0;
-
-  // lpf_opt_level = 1 : Enables dual/quad loop-filtering.
-  // lpf_opt_level is set to 1 if transform size search depth in inter blocks
-  // is limited to one as quad loop filtering assumes that all the transform
-  // blocks within a 16x8/8x16/16x16 prediction block are of the same size.
-  // lpf_opt_level = 2 : Filters both chroma planes together, in addition to
-  // enabling dual/quad loop-filtering. This is enabled when lpf pick method
-  // is LPF_PICK_FROM_Q as u and v plane filter levels are equal.
-  int lpf_opt_level = 0;
-  if (is_inter_tx_size_search_level_one(&cpi->sf.tx_sf)) {
-    lpf_opt_level = (cpi->sf.lpf_sf.lpf_pick == LPF_PICK_FROM_Q) ? 2 : 1;
-  }
-
-  struct loopfilter *lf = &cm->lf;
 
 #if CONFIG_COLLECT_COMPONENT_TIMING
   start_timing(cpi, loop_filter_time);
 #endif
   if (use_loopfilter) {
     av1_pick_filter_level(cpi->source, cpi, cpi->sf.lpf_sf.lpf_pick);
-  } else {
-    lf->filter_level[0] = 0;
-    lf->filter_level[1] = 0;
+    if (should_skip_postproc_filtering(cpi, use_cdef, use_restoration)) return;
+    struct loopfilter *lf = &cm->lf;
+    if ((lf->filter_level[0] || lf->filter_level[1]) &&
+        !cpi->rtc_ref.non_reference_frame) {
+      // lpf_opt_level = 1 : Enables dual/quad loop-filtering.
+      // lpf_opt_level is set to 1 if transform size search depth in inter
+      // blocks is limited to one as quad loop filtering assumes that all the
+      // transform blocks within a 16x8/8x16/16x16 prediction block are of the
+      // same size. lpf_opt_level = 2 : Filters both chroma planes together, in
+      // addition to enabling dual/quad loop-filtering. This is enabled when lpf
+      // pick method is LPF_PICK_FROM_Q as u and v plane filter levels are
+      // equal.
+      int lpf_opt_level = 0;
+      if (is_inter_tx_size_search_level_one(&cpi->sf.tx_sf)) {
+        lpf_opt_level = (cpi->sf.lpf_sf.lpf_pick == LPF_PICK_FROM_Q) ? 2 : 1;
+      }
+      av1_loop_filter_frame_mt(&cm->cur_frame->buf, cm, xd, 0, num_planes, 0,
+                               mt_info->workers, num_workers,
+                               &mt_info->lf_row_sync, lpf_opt_level);
+    }
   }
 
-  if ((lf->filter_level[0] || lf->filter_level[1]) &&
-      !cpi->rtc_ref.non_reference_frame) {
-    av1_loop_filter_frame_mt(&cm->cur_frame->buf, cm, xd, 0, num_planes, 0,
-                             mt_info->workers, num_workers,
-                             &mt_info->lf_row_sync, lpf_opt_level);
-  }
 #if CONFIG_COLLECT_COMPONENT_TIMING
   end_timing(cpi, loop_filter_time);
 #endif
@@ -3119,29 +3184,11 @@ static int encode_with_recode_loop_and_filter(AV1_COMP *cpi, size_t *size,
   cm->cur_frame->buf.render_width = cm->render_width;
   cm->cur_frame->buf.render_height = cm->render_height;
 
-  // Pick the loop filter level for the frame.
-  if (!cm->features.allow_intrabc) {
-    loopfilter_frame(cpi, cm);
-  } else {
-    cm->lf.filter_level[0] = 0;
-    cm->lf.filter_level[1] = 0;
-    cm->cdef_info.cdef_bits = 0;
-    cm->cdef_info.cdef_strengths[0] = 0;
-    cm->cdef_info.nb_cdef_strengths = 1;
-    cm->cdef_info.cdef_uv_strengths[0] = 0;
-    cm->rst_info[0].frame_restoration_type = RESTORE_NONE;
-    cm->rst_info[1].frame_restoration_type = RESTORE_NONE;
-    cm->rst_info[2].frame_restoration_type = RESTORE_NONE;
-  }
+  set_postproc_filter_default_params(cm);
 
-  // TODO(debargha): Fix mv search range on encoder side
-  for (int plane = 0; plane < av1_num_planes(cm); ++plane) {
-    if (cm->extend_border_mt[plane] == 0) {
-      const YV12_BUFFER_CONFIG *ybf = &cm->cur_frame->buf;
-      aom_extend_frame_borders_plane_row(ybf, plane, 0,
-                                         ybf->crop_heights[plane > 0]);
-    }
-  }
+  if (!cm->features.allow_intrabc) loopfilter_frame(cpi, cm);
+
+  extend_frame_borders(cpi);
 
 #ifdef OUTPUT_YUV_REC
   aom_write_one_yuv_frame(cm, &cm->cur_frame->buf);
@@ -3183,7 +3230,7 @@ static int encode_with_recode_loop_and_filter(AV1_COMP *cpi, size_t *size,
     PSNR_STATS psnr;
     aom_calc_psnr(cpi->source, &cpi->common.cur_frame->buf, &psnr);
     DuckyEncodeFrameResult *frame_result = &cpi->ducky_encode_info.frame_result;
-    frame_result->global_order_idx = cm->cur_frame->order_hint;
+    frame_result->global_order_idx = cm->cur_frame->display_order_hint;
     frame_result->q_index = cm->quant_params.base_qindex;
     frame_result->rdmult = cpi->rd.RDMULT;
     frame_result->rate = (int)(*size) * 8;
@@ -3360,12 +3407,13 @@ static AOM_INLINE int selective_disable_cdf_rtc(const AV1_COMP *cpi) {
   if (cpi->svc.number_spatial_layers == 1 &&
       cpi->svc.number_temporal_layers == 1) {
     // Don't disable on intra_only, scene change (high_source_sad = 1),
-    // or resized frame. To avoid quality loss for now, force enable at
-    // every 8 frames.
+    // or resized frame. To avoid quality loss force enable at
+    // for ~30 frames after key or scene/slide change, and
+    // after 8 frames since last update if frame_source_sad > 0.
     if (frame_is_intra_only(cm) || is_frame_resize_pending(cpi) ||
-        rc->high_source_sad || rc->frames_since_key < 10 ||
-        cpi->cyclic_refresh->counter_encode_maxq_scene_change < 10 ||
-        cm->current_frame.frame_number % 8 == 0)
+        rc->high_source_sad || rc->frames_since_key < 30 ||
+        cpi->cyclic_refresh->counter_encode_maxq_scene_change < 30 ||
+        (cpi->frames_since_last_update > 8 && cpi->rc.frame_source_sad > 0))
       return 0;
     else
       return 1;
@@ -3564,7 +3612,7 @@ static int encode_frame_to_data_rate(AV1_COMP *cpi, size_t *size,
       aom_calc_psnr(cpi->source, &cpi->common.cur_frame->buf, &psnr);
       DuckyEncodeFrameResult *frame_result =
           &cpi->ducky_encode_info.frame_result;
-      frame_result->global_order_idx = cm->cur_frame->order_hint;
+      frame_result->global_order_idx = cm->cur_frame->display_order_hint;
       frame_result->q_index = cm->quant_params.base_qindex;
       frame_result->rdmult = cpi->rd.RDMULT;
       frame_result->rate = (int)(*size) * 8;
@@ -4974,7 +5022,7 @@ int av1_get_preview_raw_frame(AV1_COMP *cpi, YV12_BUFFER_CONFIG *dest) {
     return -1;
   } else {
     int ret;
-    if (cm->cur_frame != NULL) {
+    if (cm->cur_frame != NULL && !cpi->oxcf.algo_cfg.skip_postproc_filtering) {
       *dest = cm->cur_frame->buf;
       dest->y_width = cm->width;
       dest->y_height = cm->height;
@@ -4989,7 +5037,9 @@ int av1_get_preview_raw_frame(AV1_COMP *cpi, YV12_BUFFER_CONFIG *dest) {
 }
 
 int av1_get_last_show_frame(AV1_COMP *cpi, YV12_BUFFER_CONFIG *frame) {
-  if (cpi->last_show_frame_buf == NULL) return -1;
+  if (cpi->last_show_frame_buf == NULL ||
+      cpi->oxcf.algo_cfg.skip_postproc_filtering)
+    return -1;
 
   *frame = cpi->last_show_frame_buf->buf;
   return 0;

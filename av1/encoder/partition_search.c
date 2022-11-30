@@ -452,13 +452,10 @@ static void encode_superblock(const AV1_COMP *const cpi, TileDataEnc *tile_data,
                            xd->block_ref_scale_factors[ref], num_planes);
     }
     // Predicted sample of inter mode (for Luma plane) cannot be reused if
-    // nonrd_check_partition_merge_mode or nonrd_check_partition_split speed
-    // feature is enabled, Since in such cases the buffer may not contain the
-    // predicted sample of best mode.
+    // nonrd_check_partition_split speed feature is enabled, Since in such cases
+    // the buffer may not contain the predicted sample of best mode.
     const int start_plane =
-        (cpi->sf.rt_sf.reuse_inter_pred_nonrd &&
-         (!cpi->sf.rt_sf.nonrd_check_partition_merge_mode) &&
-         (!cpi->sf.rt_sf.nonrd_check_partition_split) &&
+        (x->reuse_inter_pred && (!cpi->sf.rt_sf.nonrd_check_partition_split) &&
          cm->seq_params->bit_depth == AOM_BITS_8)
             ? 1
             : 0;
@@ -828,9 +825,18 @@ static AOM_INLINE void hybrid_intra_mode_search(AV1_COMP *cpi,
     av1_nonrd_pick_intra_mode(cpi, x, rd_cost, bsize, ctx);
 }
 
-static AOM_INLINE int is_top_right_block_in_sb(BLOCK_SIZE sb_size,
-                                               BLOCK_SIZE bsize, int mi_row,
-                                               int mi_col) {
+// For real time/allintra row-mt enabled multi-threaded encoding with cost
+// update frequency set to COST_UPD_TILE/COST_UPD_OFF, tile ctxt is not updated
+// at superblock level. Thus, it is not required for the encoding of top-right
+// superblock be complete for updating tile ctxt. However, when encoding a block
+// whose right edge is also the superblock edge, intra and inter mode evaluation
+// (ref mv list population) require the encoding of the top-right superblock to
+// be complete. So, here, we delay the waiting of threads until the need for the
+// data from the top-right superblock region.
+static AOM_INLINE void wait_for_top_right_sb(
+    AV1EncRowMultiThreadInfo *enc_row_mt, AV1EncRowMultiThreadSync *row_mt_sync,
+    TileInfo *tile_info, BLOCK_SIZE sb_size, int sb_mi_size_log2,
+    BLOCK_SIZE bsize, int mi_row, int mi_col) {
   const int sb_size_in_mi = mi_size_wide[sb_size];
   const int bw_in_mi = mi_size_wide[bsize];
   const int blk_row_in_sb = mi_row & (sb_size_in_mi - 1);
@@ -838,103 +844,16 @@ static AOM_INLINE int is_top_right_block_in_sb(BLOCK_SIZE sb_size,
   const int top_right_block_in_sb =
       (blk_row_in_sb == 0) && (blk_col_in_sb + bw_in_mi >= sb_size_in_mi);
 
-  return top_right_block_in_sb;
-}
-
-// For real time/allintra row-mt enabled multi-threaded encoding with cost
-// update frequency set to COST_UPD_TILE/COST_UPD_OFF, tile ctxt is not updated
-// at superblock level. Thus, it is not required for the encoding of top-right
-// superblock be complete for updating tile ctxt. However, when encoding a block
-// whose right edge is also the superblock edge, intra and inter mode evaluation
-// (ref mv list population) require the encoding of the top-right region to
-// be complete. So, here, we delay the waiting of threads until the need for the
-// data from the top-right superblock region.
-static AOM_INLINE void wait_for_top_right(AV1_COMP *cpi,
-                                          AV1EncRowMultiThreadSync *row_mt_sync,
-                                          TileInfo *tile_info,
-                                          BLOCK_SIZE sb_size, BLOCK_SIZE bsize,
-                                          int mi_row, int mi_col,
-                                          int seg_skip_active) {
   // Don't wait if the block is the not the top-right block in the superblock.
-  if (!is_top_right_block_in_sb(sb_size, bsize, mi_row, mi_col)) return;
+  if (!top_right_block_in_sb) return;
 
-  AV1EncRowMultiThreadInfo *enc_row_mt = &cpi->mt_info.enc_row_mt;
-  const int sb_mi_size_log2 = mi_size_wide_log2[sb_size];
+  // Wait for the top-right superblock to finish encoding.
   const int sb_row_in_tile =
       (mi_row - tile_info->mi_row_start) >> sb_mi_size_log2;
+  const int sb_col_in_tile =
+      (mi_col - tile_info->mi_col_start) >> sb_mi_size_log2;
 
-  // In case of non-rd RT with row-mt enabled, encoding of SB can start after
-  // encoding of bottom left block in above right superblock is complete. This
-  // is because only DC, H and V intra modes are enabled via the speed feature
-  // intra_y_mode_bsize_mask_nrd (above right region not required) and reference
-  // mv list population requires only the above right block info.
-  if (enable_top_right_sync_wait_in_mis(cpi, seg_skip_active)) {
-    const int *intra_y_mode_bsize_mask_nrd =
-        cpi->sf.rt_sf.intra_y_mode_bsize_mask_nrd;
-    for (int i = 0; i < BLOCK_SIZES; ++i)
-      assert(intra_y_mode_bsize_mask_nrd[i] == INTRA_DC ||
-             intra_y_mode_bsize_mask_nrd[i] == INTRA_DC_H_V);
-    (void)intra_y_mode_bsize_mask_nrd;
-#if CONFIG_MULTITHREAD
-    const int mi_col_in_tile = mi_col - tile_info->mi_col_start;
-    const int mi_cols_in_tile = tile_info->mi_col_end - tile_info->mi_col_start;
-    const int bw_in_mi = mi_size_wide[bsize];
-    if (sb_row_in_tile) {
-      pthread_mutex_t *const mutex = &row_mt_sync->mutex_[sb_row_in_tile - 1];
-      pthread_mutex_lock(mutex);
-
-      while (AOMMIN(mi_col_in_tile + bw_in_mi, mi_cols_in_tile) >=
-             row_mt_sync->finished_block_in_mi[sb_row_in_tile - 1]) {
-        pthread_cond_wait(&row_mt_sync->cond_[sb_row_in_tile - 1], mutex);
-      }
-      pthread_mutex_unlock(mutex);
-    }
-#endif
-  } else {
-    const int sb_col_in_tile =
-        (mi_col - tile_info->mi_col_start) >> sb_mi_size_log2;
-    enc_row_mt->sync_read_ptr(row_mt_sync, sb_row_in_tile, sb_col_in_tile);
-  }
-}
-
-static AOM_INLINE void write_completed_mi_pos(
-    AV1EncRowMultiThreadSync *row_mt_sync, TileInfo *tile_info,
-    BLOCK_SIZE sb_size, BLOCK_SIZE bsize, int mi_row, int mi_col) {
-  const int sb_size_in_mi = mi_size_high[sb_size];
-  const int bh_in_mi = mi_size_high[bsize];
-  const int blk_row_in_sb = mi_row & (sb_size_in_mi - 1);
-  const int bottom_block_in_sb = blk_row_in_sb + bh_in_mi >= sb_size_in_mi;
-
-  // Don't write if the block is the not the bottom block in the
-  // superblock.
-  if (!bottom_block_in_sb) return;
-
-#if CONFIG_MULTITHREAD
-  const int sb_mi_size_log2 = mi_size_wide_log2[sb_size];
-  const int sb_row_in_tile =
-      (mi_row - tile_info->mi_row_start) >> sb_mi_size_log2;
-  const int bw_in_mi = mi_size_wide[bsize];
-  const int mi_col_in_tile = mi_col + bw_in_mi - tile_info->mi_col_start;
-  const int mi_cols_in_tile = tile_info->mi_col_end - tile_info->mi_col_start;
-
-  const int finished_mi_col = mi_col_in_tile < mi_cols_in_tile - 1
-                                  ? mi_col_in_tile
-                                  : mi_cols_in_tile + 1;
-
-  pthread_mutex_lock(&row_mt_sync->mutex_[sb_row_in_tile]);
-
-  row_mt_sync->finished_block_in_mi[sb_row_in_tile] = finished_mi_col;
-
-  pthread_cond_signal(&row_mt_sync->cond_[sb_row_in_tile]);
-  pthread_mutex_unlock(&row_mt_sync->mutex_[sb_row_in_tile]);
-#else
-  (void)row_mt_sync;
-  (void)tile_info;
-  (void)sb_size;
-  (void)bsize;
-  (void)mi_row;
-  (void)mi_col;
-#endif  // CONFIG_MULTITHREAD
+  enc_row_mt->sync_read_ptr(row_mt_sync, sb_row_in_tile, sb_col_in_tile);
 }
 
 /*!\brief Interface for AV1 mode search for an individual coding block
@@ -1007,8 +926,9 @@ static void pick_sb_modes(AV1_COMP *const cpi, TileDataEnc *tile_data,
 
   // This is only needed for real time/allintra row-mt enabled multi-threaded
   // encoding with cost update frequency set to COST_UPD_TILE/COST_UPD_OFF.
-  wait_for_top_right(cpi, &tile_data->row_mt_sync, &tile_data->tile_info,
-                     cm->seq_params->sb_size, bsize, mi_row, mi_col, 0);
+  wait_for_top_right_sb(&cpi->mt_info.enc_row_mt, &tile_data->row_mt_sync,
+                        &tile_data->tile_info, cm->seq_params->sb_size,
+                        cm->seq_params->mib_size_log2, bsize, mi_row, mi_col);
 
 #if CONFIG_COLLECT_COMPONENT_TIMING
   start_timing(cpi, rd_pick_sb_modes_time);
@@ -2293,11 +2213,46 @@ static void encode_b_nonrd(const AV1_COMP *const cpi, TileDataEnc *tile_data,
 #if CONFIG_COLLECT_COMPONENT_TIMING
   end_timing((AV1_COMP *)cpi, encode_b_nonrd_time);
 #endif
-  const int seg_skip_active =
-      segfeature_active(&cm->seg, mbmi->segment_id, SEG_LVL_SKIP);
-  if (!dry_run && enable_top_right_sync_wait_in_mis(cpi, seg_skip_active))
-    write_completed_mi_pos(&tile_data->row_mt_sync, &tile_data->tile_info,
-                           cm->seq_params->sb_size, bsize, mi_row, mi_col);
+}
+
+static int get_force_zeromv_skip_flag_for_blk(const AV1_COMP *cpi,
+                                              const MACROBLOCK *x,
+                                              BLOCK_SIZE bsize) {
+  // Force zero MV skip based on SB level decision
+  if (x->force_zeromv_skip_for_sb < 2) return x->force_zeromv_skip_for_sb;
+
+  // For blocks of size equal to superblock size, the decision would have been
+  // already done at superblock level. Hence zeromv-skip decision is skipped.
+  const AV1_COMMON *const cm = &cpi->common;
+  if (bsize == cm->seq_params->sb_size) return 0;
+
+  const int num_planes = av1_num_planes(cm);
+  const MACROBLOCKD *const xd = &x->e_mbd;
+  const unsigned int thresh_exit_part_y =
+      cpi->zeromv_skip_thresh_exit_part[bsize];
+  const unsigned int thresh_exit_part_uv =
+      CALC_CHROMA_THRESH_FOR_ZEROMV_SKIP(thresh_exit_part_y);
+  const unsigned int thresh_exit_part[MAX_MB_PLANE] = { thresh_exit_part_y,
+                                                        thresh_exit_part_uv,
+                                                        thresh_exit_part_uv };
+  const YV12_BUFFER_CONFIG *const yv12 = get_ref_frame_yv12_buf(cm, LAST_FRAME);
+  const struct scale_factors *const sf =
+      get_ref_scale_factors_const(cm, LAST_FRAME);
+
+  struct buf_2d yv12_mb[MAX_MB_PLANE];
+  av1_setup_pred_block(xd, yv12_mb, yv12, sf, sf, num_planes);
+
+  for (int plane = 0; plane < num_planes; ++plane) {
+    const struct macroblock_plane *const p = &x->plane[plane];
+    const struct macroblockd_plane *const pd = &xd->plane[plane];
+    const BLOCK_SIZE bs =
+        get_plane_block_size(bsize, pd->subsampling_x, pd->subsampling_y);
+    const unsigned int plane_sad = cpi->ppi->fn_ptr[bs].sdf(
+        p->src.buf, p->src.stride, yv12_mb[plane].buf, yv12_mb[plane].stride);
+    assert(plane < MAX_MB_PLANE);
+    if (plane_sad >= thresh_exit_part[plane]) return 0;
+  }
+  return 1;
 }
 
 /*!\brief Top level function to pick block mode for non-RD optimized case
@@ -2354,6 +2309,12 @@ static void pick_sb_modes_nonrd(AV1_COMP *const cpi, TileDataEnc *tile_data,
   TxfmSearchInfo *txfm_info = &x->txfm_search_info;
   int i;
 
+  // This is only needed for real time/allintra row-mt enabled multi-threaded
+  // encoding with cost update frequency set to COST_UPD_TILE/COST_UPD_OFF.
+  wait_for_top_right_sb(&cpi->mt_info.enc_row_mt, &tile_data->row_mt_sync,
+                        &tile_data->tile_info, cm->seq_params->sb_size,
+                        cm->seq_params->mib_size_log2, bsize, mi_row, mi_col);
+
 #if CONFIG_COLLECT_COMPONENT_TIMING
   start_timing(cpi, pick_sb_modes_nonrd_time);
 #endif
@@ -2368,7 +2329,11 @@ static void pick_sb_modes_nonrd(AV1_COMP *const cpi, TileDataEnc *tile_data,
     p[i].txb_entropy_ctx = ctx->txb_entropy_ctx[i];
   }
   for (i = 0; i < 2; ++i) pd[i].color_index_map = ctx->color_index_map[i];
-  if (!x->force_zeromv_skip) {
+
+  x->force_zeromv_skip_for_blk =
+      get_force_zeromv_skip_flag_for_blk(cpi, x, bsize);
+
+  if (!x->force_zeromv_skip_for_blk) {
     x->source_variance = av1_get_perpixel_variance_facade(
         cpi, xd, &x->plane[0].src, bsize, AOM_PLANE_Y);
   }
@@ -2377,15 +2342,6 @@ static void pick_sb_modes_nonrd(AV1_COMP *const cpi, TileDataEnc *tile_data,
   setup_block_rdmult(cpi, x, mi_row, mi_col, bsize, aq_mode, mbmi);
   // Set error per bit for current rdmult
   av1_set_error_per_bit(&x->errorperbit, x->rdmult);
-
-  const int seg_skip_active =
-      segfeature_active(&cm->seg, mbmi->segment_id, SEG_LVL_SKIP);
-  // This is only needed for real time/allintra row-mt enabled multi-threaded
-  // encoding with cost update frequency set to COST_UPD_TILE/COST_UPD_OFF.
-  wait_for_top_right(cpi, &tile_data->row_mt_sync, &tile_data->tile_info,
-                     cm->seq_params->sb_size, bsize, mi_row, mi_col,
-                     seg_skip_active);
-
   // Find best coding mode & reconstruct the MB so it is available
   // as a predictor for MBs that follow in the SB
   if (frame_is_intra_only(cm)) {
@@ -2400,7 +2356,7 @@ static void pick_sb_modes_nonrd(AV1_COMP *const cpi, TileDataEnc *tile_data,
 #if CONFIG_COLLECT_COMPONENT_TIMING
     start_timing(cpi, nonrd_pick_inter_mode_sb_time);
 #endif
-    if (seg_skip_active) {
+    if (segfeature_active(&cm->seg, mbmi->segment_id, SEG_LVL_SKIP)) {
       RD_STATS invalid_rd;
       av1_invalid_rd_stats(&invalid_rd);
       // TODO(kyslov): add av1_nonrd_pick_inter_mode_sb_seg_skip
@@ -2630,15 +2586,7 @@ static void direct_partition_merging(AV1_COMP *cpi, ThreadData *td,
     // Update mi for this partition block.
     for (int y = 0; y < bs; y++) {
       for (int x_idx = 0; x_idx < bs; x_idx++) {
-        this_mi[x_idx + y * mi_params->mi_stride]->bsize = this_mi[0]->bsize;
-        this_mi[x_idx + y * mi_params->mi_stride]->partition =
-            this_mi[0]->partition;
-        this_mi[x_idx + y * mi_params->mi_stride]->skip_txfm =
-            this_mi[0]->skip_txfm;
-        this_mi[x_idx + y * mi_params->mi_stride]->tx_size =
-            this_mi[0]->tx_size;
-        memcpy(this_mi[x_idx + y * mi_params->mi_stride]->inter_tx_size,
-               this_mi[0]->inter_tx_size, sizeof(this_mi[0]->inter_tx_size));
+        this_mi[x_idx + y * mi_params->mi_stride] = this_mi[0];
       }
     }
   }
@@ -2713,6 +2661,7 @@ void av1_nonrd_use_partition(AV1_COMP *cpi, ThreadData *td,
   // Initialize default mode evaluation params
   set_mode_eval_params(cpi, x, DEFAULT_EVAL);
 
+  x->reuse_inter_pred = cpi->sf.rt_sf.reuse_inter_pred_nonrd;
   switch (partition) {
     case PARTITION_NONE:
       if (!pc_tree->none) {
@@ -2836,6 +2785,7 @@ void av1_nonrd_use_partition(AV1_COMP *cpi, ThreadData *td,
         }
         pc_tree->split[i]->index = i;
       }
+      bool do_split = false;
       if (cpi->sf.rt_sf.nonrd_check_partition_merge_mode &&
           av1_is_leaf_split_partition(cm, mi_row, mi_col, bsize) &&
           !frame_is_intra_only(cm) && bsize <= BLOCK_64X64) {
@@ -2862,11 +2812,10 @@ void av1_nonrd_use_partition(AV1_COMP *cpi, ThreadData *td,
         if (cpi->sf.rt_sf.nonrd_check_partition_merge_mode < 2 ||
             none_rdc.skip_txfm != 1 || pc_tree->none->mic.mode == NEWMV) {
           const int is_larger_qindex = cm->quant_params.base_qindex > 100;
-          const int do_split =
-              (cpi->sf.rt_sf.nonrd_check_partition_merge_mode == 3)
-                  ? (bsize <= BLOCK_32X32 ||
-                     (is_larger_qindex && bsize <= BLOCK_64X64))
-                  : 1;
+          do_split = (cpi->sf.rt_sf.nonrd_check_partition_merge_mode == 3)
+                         ? (bsize <= BLOCK_32X32 ||
+                            (is_larger_qindex && bsize <= BLOCK_64X64))
+                         : 1;
           if (do_split) {
             av1_init_rd_stats(&split_rdc);
             split_rdc.rate += mode_costs->partition_cost[pl][PARTITION_SPLIT];
@@ -2913,6 +2862,11 @@ void av1_nonrd_use_partition(AV1_COMP *cpi, ThreadData *td,
           }
         }
         if (none_rdc.rdcost < split_rdc.rdcost) {
+          /* Predicted samples can not be reused for PARTITION_NONE since same
+           * buffer is being used to store the reconstructed samples of
+           * PARTITION_SPLIT block. */
+          if (do_split) x->reuse_inter_pred = false;
+
           mib[0]->bsize = bsize;
           pc_tree->partitioning = PARTITION_NONE;
           encode_b_nonrd(cpi, tile_data, td, tp, mi_row, mi_col, 0, bsize,
@@ -2920,6 +2874,12 @@ void av1_nonrd_use_partition(AV1_COMP *cpi, ThreadData *td,
         } else {
           mib[0]->bsize = subsize;
           pc_tree->partitioning = PARTITION_SPLIT;
+          /* Predicted samples can not be reused for PARTITION_SPLIT since same
+           * buffer is being used to write the reconstructed samples. */
+          // TODO(Cherma): Store and reuse predicted samples generated by
+          // encode_b_nonrd() in DRY_RUN_NORMAL mode.
+          x->reuse_inter_pred = false;
+
           for (int i = 0; i < SUB_PARTITIONS_SPLIT; i++) {
             int x_idx = (i & 1) * hbs;
             int y_idx = (i >> 1) * hbs;

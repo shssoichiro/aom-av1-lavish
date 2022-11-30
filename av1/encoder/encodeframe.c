@@ -608,6 +608,7 @@ static INLINE void init_encode_rd_sb(AV1_COMP *cpi, ThreadData *td,
   (void)gather_tpl_data;
 #endif
 
+  x->reuse_inter_pred = false;
   x->txfm_search_params.mode_eval_type = DEFAULT_EVAL;
   reset_mb_rd_record(x->txfm_search_info.mb_rd_record);
   av1_zero(x->picked_ref_frames_mask);
@@ -753,6 +754,71 @@ static AOM_INLINE void encode_rd_sb(AV1_COMP *cpi, ThreadData *td,
   }
 }
 
+// Check if the cost update of symbols mode, coeff and dv are tile or off.
+static AOM_INLINE int is_mode_coeff_dv_upd_freq_tile_or_off(
+    const AV1_COMP *const cpi) {
+  const INTER_MODE_SPEED_FEATURES *const inter_sf = &cpi->sf.inter_sf;
+
+  return (inter_sf->coeff_cost_upd_level <= INTERNAL_COST_UPD_TILE &&
+          inter_sf->mode_cost_upd_level <= INTERNAL_COST_UPD_TILE &&
+          cpi->sf.intra_sf.dv_cost_upd_level <= INTERNAL_COST_UPD_TILE);
+}
+
+// When row-mt is enabled and cost update frequencies are set to off/tile,
+// processing of current SB can start even before processing of top-right SB
+// is finished. This function checks if it is sufficient to wait for top SB
+// to finish processing before current SB starts processing.
+static AOM_INLINE int delay_wait_for_top_right_sb(const AV1_COMP *const cpi) {
+  const MODE mode = cpi->oxcf.mode;
+  if (mode == GOOD) return 0;
+
+  if (mode == ALLINTRA)
+    return is_mode_coeff_dv_upd_freq_tile_or_off(cpi);
+  else if (mode == REALTIME)
+    return (is_mode_coeff_dv_upd_freq_tile_or_off(cpi) &&
+            cpi->sf.inter_sf.mv_cost_upd_level <= INTERNAL_COST_UPD_TILE);
+  else
+    return 0;
+}
+
+/*!\brief Calculate source SAD at superblock level using 64x64 block source SAD
+ *
+ * \ingroup partition_search
+ * \callgraph
+ * \callergraph
+ */
+static AOM_INLINE uint64_t get_sb_source_sad(const AV1_COMP *cpi, int mi_row,
+                                             int mi_col) {
+  if (cpi->src_sad_blk_64x64 == NULL) return UINT64_MAX;
+
+  const AV1_COMMON *const cm = &cpi->common;
+  const int blk_64x64_in_mis = (cm->seq_params->sb_size == BLOCK_128X128)
+                                   ? (cm->seq_params->mib_size >> 1)
+                                   : cm->seq_params->mib_size;
+  const int num_blk_64x64_cols =
+      (cm->mi_params.mi_cols + blk_64x64_in_mis - 1) / blk_64x64_in_mis;
+  const int num_blk_64x64_rows =
+      (cm->mi_params.mi_rows + blk_64x64_in_mis - 1) / blk_64x64_in_mis;
+  const int blk_64x64_col_index = mi_col / blk_64x64_in_mis;
+  const int blk_64x64_row_index = mi_row / blk_64x64_in_mis;
+  uint64_t curr_sb_sad = UINT64_MAX;
+  const uint64_t *const src_sad_blk_64x64_data =
+      &cpi->src_sad_blk_64x64[blk_64x64_col_index +
+                              blk_64x64_row_index * num_blk_64x64_cols];
+  if (cm->seq_params->sb_size == BLOCK_128X128 &&
+      blk_64x64_col_index + 1 < num_blk_64x64_cols &&
+      blk_64x64_row_index + 1 < num_blk_64x64_rows) {
+    // Calculate SB source SAD by accumulating source SAD of 64x64 blocks in the
+    // superblock
+    curr_sb_sad = src_sad_blk_64x64_data[0] + src_sad_blk_64x64_data[1] +
+                  src_sad_blk_64x64_data[num_blk_64x64_cols] +
+                  src_sad_blk_64x64_data[num_blk_64x64_cols + 1];
+  } else if (cm->seq_params->sb_size == BLOCK_64X64) {
+    curr_sb_sad = src_sad_blk_64x64_data[0];
+  }
+  return curr_sb_sad;
+}
+
 /*!\brief Determine whether grading content can be skipped based on sad stat
  *
  * \ingroup partition_search
@@ -762,29 +828,30 @@ static AOM_INLINE void encode_rd_sb(AV1_COMP *cpi, ThreadData *td,
 static AOM_INLINE bool is_calc_src_content_needed(AV1_COMP *cpi,
                                                   MACROBLOCK *const x,
                                                   int mi_row, int mi_col) {
+  const uint64_t curr_sb_sad = get_sb_source_sad(cpi, mi_row, mi_col);
+  if (curr_sb_sad == UINT64_MAX) return true;
+  if (curr_sb_sad == 0) {
+    x->content_state_sb.source_sad_nonrd = kZeroSad;
+    return false;
+  }
   AV1_COMMON *const cm = &cpi->common;
   bool do_calc_src_content = true;
 
   if (cpi->oxcf.speed < 9) return do_calc_src_content;
 
-  // TODO(yunqing): Need to consider 4 64x64 results if later this is used for
-  // 128x128 sb size.
-  if (cpi->src_sad_blk_64x64 != NULL && AOMMIN(cm->width, cm->height) < 360) {
-    const int sb_size_by_mb = (cm->seq_params->sb_size == BLOCK_128X128)
-                                  ? (cm->seq_params->mib_size >> 1)
-                                  : cm->seq_params->mib_size;
-    const int sb_cols =
-        (cm->mi_params.mi_cols + sb_size_by_mb - 1) / sb_size_by_mb;
-    const int sbi_col = mi_col / sb_size_by_mb;
-    const int sbi_row = mi_row / sb_size_by_mb;
+  // TODO(yunqing): Tune/validate the thresholds for 128x128 SB size.
+  if (AOMMIN(cm->width, cm->height) < 360) {
+    // Derive Average 64x64 block source SAD from SB source SAD
+    const uint64_t avg_64x64_blk_sad =
+        (cm->seq_params->sb_size == BLOCK_128X128) ? ((curr_sb_sad + 2) >> 2)
+                                                   : curr_sb_sad;
+
     // The threshold is determined based on kLowSad and kHighSad threshold and
     // test results.
     const uint64_t thresh_low = 15000;
     const uint64_t thresh_high = 40000;
-    const uint64_t blk_sad =
-        cpi->src_sad_blk_64x64[sbi_col + sbi_row * sb_cols];
 
-    if (blk_sad > thresh_low && blk_sad < thresh_high) {
+    if (avg_64x64_blk_sad > thresh_low && avg_64x64_blk_sad < thresh_high) {
       do_calc_src_content = false;
       // Note: set x->content_state_sb.source_sad_rd as well if this is extended
       // to RTC rd path.
@@ -803,8 +870,9 @@ static AOM_INLINE bool is_calc_src_content_needed(AV1_COMP *cpi,
  */
 // TODO(any): consolidate sfs to make interface cleaner
 static AOM_INLINE void grade_source_content_sb(AV1_COMP *cpi,
-                                               MACROBLOCK *const x, int mi_row,
-                                               int mi_col) {
+                                               MACROBLOCK *const x,
+                                               TileDataEnc *tile_data,
+                                               int mi_row, int mi_col) {
   AV1_COMMON *const cm = &cpi->common;
   bool calc_src_content = false;
 
@@ -823,7 +891,8 @@ static AOM_INLINE void grade_source_content_sb(AV1_COMP *cpi,
     else
       x->content_state_sb.source_sad_rd = kZeroSad;
   }
-  if (calc_src_content) av1_source_content_sb(cpi, x, mi_row, mi_col);
+  if (calc_src_content)
+    av1_source_content_sb(cpi, x, tile_data, mi_row, mi_col);
 }
 
 /*!\brief Encode a superblock row by breaking it into superblocks
@@ -910,7 +979,7 @@ static AOM_INLINE void encode_sb_row(AV1_COMP *cpi, ThreadData *td,
     x->content_state_sb.source_sad_rd = kMedSad;
     x->content_state_sb.lighting_change = 0;
     x->content_state_sb.low_sumdiff = 0;
-    x->force_zeromv_skip = 0;
+    x->force_zeromv_skip_for_sb = 0;
 
     if (cpi->oxcf.mode == ALLINTRA || cpi->oxcf.tune_cfg.content == AOM_CONTENT_PSY) {
       x->intra_sb_rdmult_modifier = 128;
@@ -939,7 +1008,7 @@ static AOM_INLINE void encode_sb_row(AV1_COMP *cpi, ThreadData *td,
 
     // Grade the temporal variation of the sb, the grade will be used to decide
     // fast mode search strategy for coding blocks
-    grade_source_content_sb(cpi, x, mi_row, mi_col);
+    grade_source_content_sb(cpi, x, tile_data, mi_row, mi_col);
 
     // encode the superblock
     if (use_nonrd_mode) {
@@ -1385,6 +1454,43 @@ static int allow_deltaq_mode(AV1_COMP *cpi) {
 #endif  // !CONFIG_REALTIME_ONLY
 }
 
+#define FORCE_ZMV_SKIP_128X128_BLK_DIFF 10000
+#define FORCE_ZMV_SKIP_MAX_PER_PIXEL_DIFF 4
+
+// Populates block level thresholds for force zeromv-skip decision
+static void populate_thresh_to_force_zeromv_skip(AV1_COMP *cpi) {
+  if (cpi->sf.rt_sf.part_early_exit_zeromv == 0) return;
+
+  // Threshold for forcing zeromv-skip decision is as below:
+  // For 128x128 blocks, threshold is 10000 and per pixel threshold is 0.6103.
+  // For 64x64 blocks, threshold is 5000 and per pixel threshold is 1.221
+  // allowing slightly higher error for smaller blocks.
+  // Per Pixel Threshold of 64x64 block        Area of 64x64 block         1  1
+  // ------------------------------------=sqrt(---------------------)=sqrt(-)=-
+  // Per Pixel Threshold of 128x128 block      Area of 128x128 block       4  2
+  // Thus, per pixel thresholds for blocks of size 32x32, 16x16,...  can be
+  // chosen as 2.442, 4.884,.... As the per pixel error tends to be higher for
+  // small blocks, the same is clipped to 4.
+  const unsigned int thresh_exit_128x128_part = FORCE_ZMV_SKIP_128X128_BLK_DIFF;
+  const int num_128x128_pix =
+      block_size_wide[BLOCK_128X128] * block_size_high[BLOCK_128X128];
+
+  for (BLOCK_SIZE bsize = BLOCK_4X4; bsize < BLOCK_SIZES_ALL; bsize++) {
+    const int num_block_pix = block_size_wide[bsize] * block_size_high[bsize];
+
+    // Calculate the threshold for zeromv-skip decision based on area of the
+    // partition
+    unsigned int thresh_exit_part_blk =
+        (unsigned int)(thresh_exit_128x128_part *
+                           sqrt((double)num_block_pix / num_128x128_pix) +
+                       0.5);
+    thresh_exit_part_blk = AOMMIN(
+        thresh_exit_part_blk,
+        (unsigned int)(FORCE_ZMV_SKIP_MAX_PER_PIXEL_DIFF * num_block_pix));
+    cpi->zeromv_skip_thresh_exit_part[bsize] = thresh_exit_part_blk;
+  }
+}
+
 /*!\brief Encoder setup(only for the current frame), encoding, and recontruction
  * for a single frame
  *
@@ -1648,6 +1754,7 @@ static AOM_INLINE void encode_frame_internal(AV1_COMP *cpi) {
   // has to be called after 'skip_mode_flag' is initialized.
   av1_initialize_rd_consts(cpi);
   av1_set_sad_per_bit(cpi, &x->sadperbit, quant_params->base_qindex);
+  populate_thresh_to_force_zeromv_skip(cpi);
 
   enc_row_mt->sync_read_ptr = av1_row_mt_sync_read_dummy;
   enc_row_mt->sync_write_ptr = av1_row_mt_sync_write_dummy;
@@ -1942,9 +2049,10 @@ void av1_encode_frame(AV1_COMP *cpi) {
   FeatureFlags *const features = &cm->features;
   const int num_planes = av1_num_planes(cm);
   RD_COUNTS *const rdc = &cpi->td.rd_counts;
+  const AV1EncoderConfig *const oxcf = &cpi->oxcf;
   // Indicates whether or not to use a default reduced set for ext-tx
   // rather than the potential full set of 16 transforms
-  features->reduced_tx_set_used = cpi->oxcf.txfm_cfg.reduced_tx_type_set;
+  features->reduced_tx_set_used = oxcf->txfm_cfg.reduced_tx_type_set;
 
   // Make sure segment_id is no larger than last_active_segid.
   if (cm->seg.enabled && cm->seg.update_map) {
@@ -1986,7 +2094,8 @@ void av1_encode_frame(AV1_COMP *cpi) {
     features->interp_filter = SWITCHABLE;
     if (cm->tiles.large_scale) features->interp_filter = EIGHTTAP_REGULAR;
 
-    features->switchable_motion_mode = 1;
+    features->switchable_motion_mode = is_switchable_motion_mode_allowed(
+        features->allow_warped_motion, oxcf->motion_mode_cfg.enable_obmc);
 
     rdc->compound_ref_used_flag = 0;
     rdc->skip_mode_used_flag = 0;
