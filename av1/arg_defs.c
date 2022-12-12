@@ -747,7 +747,7 @@ const av1_codec_arg_definitions_t g_av1_codec_arg_defs = {
 #if CONFIG_TUNE_VMAF
   .vmaf_resize_factor = ARG_DEF(NULL, "vmaf-resize-factor", 1,
                        "Change internal resizing for faster calculations with vmaf tunes\n "
-                       "                                        0 - Resize to half (Default), 1 - Resize to a quarter."),
+                       "                                        0 - Do not resize, 1 - Resize to half res (Default), 2 - Resize to quarter res, 3 - Resize to eighth res."),
   .vmaf_rd_mult = ARG_DEF(NULL, "vmaf-rd-mult", 1,
                        "Multiplier for vmaf tunes rdmult "
                                   "(Meant for hyper-tuning, only active with tunes that utilize vmaf rdo, defaults to 100)"),

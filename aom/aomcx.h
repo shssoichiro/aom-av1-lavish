@@ -1455,15 +1455,15 @@ enum aome_enc_control_id {
   AV1E_GET_TARGET_SEQ_LEVEL_IDX = 155,
 
   // ClybPatch -- TODO: Ideally, this should be reworked to be able to be successfully patched without needing to be touched every time there's a new param by other developers.
-  AOME_SET_DQ_MODULATE = AV1E_GET_TARGET_SEQ_LEVEL_IDX + 2,
+  AOME_SET_DQ_MODULATE = AV1E_GET_TARGET_SEQ_LEVEL_IDX + 6,
   /*!\ClybPatch -- brief Codec control function to set the quantization sharpness parameter,
    * unsigned int parameter.
    *
    * Valid range: 0..7. The default is 0. Values 1-7 will change quantization in favour of block sharpness.
    */
-  AOME_SET_QUANT_SHARPNESS = AV1E_GET_TARGET_SEQ_LEVEL_IDX + 3,
+  AOME_SET_QUANT_SHARPNESS = AV1E_GET_TARGET_SEQ_LEVEL_IDX + 7,
   // ClybPatch -- Idea thanks to Opmox, sets the TPL model's strength / effectiveness.
-  AOME_SET_DELTA_QINDEX_MULT = AV1E_GET_TARGET_SEQ_LEVEL_IDX + 4,
+  AOME_SET_DELTA_QINDEX_MULT = AV1E_GET_TARGET_SEQ_LEVEL_IDX + 8,
 
   AOME_SET_DELTA_QINDEX_MULT_POS = AOME_SET_DELTA_QINDEX_MULT + 1,
 

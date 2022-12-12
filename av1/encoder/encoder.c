@@ -3011,11 +3011,12 @@ static int encode_with_recode_loop(AV1_COMP *cpi, size_t *size, uint8_t *dest) {
     }
 
 #if CONFIG_TUNE_BUTTERAUGLI
-    if (loop_count == 0 && (oxcf->tune_cfg.tuning == AOM_TUNE_BUTTERAUGLI ||
+    if (loop_count <= 1 && (oxcf->tune_cfg.tuning == AOM_TUNE_BUTTERAUGLI ||
         oxcf->tune_cfg.tuning == AOM_TUNE_LAVISH ||
         oxcf->tune_cfg.tuning == AOM_TUNE_EXPERIMENTAL)) {
-      loop = 1;
-      if (oxcf->tune_cfg.tuning == AOM_TUNE_LAVISH || AOM_TUNE_EXPERIMENTAL) {
+      if (loop_count == 0) loop = 1;
+      if (cpi->oxcf.enable_experimental_psy == 1) loop = 1;
+      if (oxcf->tune_cfg.tuning == AOM_TUNE_LAVISH || oxcf->tune_cfg.tuning == AOM_TUNE_EXPERIMENTAL) {
         av1_setup_butteraugli_rdmult_and_restore_source(cpi, 0.0);
       } else {
         av1_setup_butteraugli_rdmult_and_restore_source(cpi, 0.4);

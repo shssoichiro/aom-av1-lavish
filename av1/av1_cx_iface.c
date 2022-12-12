@@ -394,7 +394,7 @@ static const struct av1_extracfg default_extra_cfg = {
   1,               // butteraugli_resize_factor
   0,               // loopfilter_sharpness
   0,               // enable_experimental_psy
-  0,               // vmaf_resize_factor
+  1,               // vmaf_resize_factor
   100,             // vmaf_rd_mult
   100,             // tpl_rd_mult
   0,               // sb_qp_sweep
@@ -564,7 +564,7 @@ static const struct av1_extracfg default_extra_cfg = {
   1,               // butteraugli_resize_factor
   0,               // loopfilter_sharpness
   0,               // enable_experimental_psy
-  0,               // vmaf_resize_factor
+  1,               // vmaf_resize_factor
   100,             // vmaf_rd_mult
   100,             // tpl_rd_mult
   0,               // sb_qp_sweep
@@ -963,7 +963,7 @@ static aom_codec_err_t validate_config(aom_codec_alg_priv_t *ctx,
   RANGE_CHECK(extra_cfg, butteraugli_resize_factor, 0, 2);
 #endif
 #if CONFIG_TUNE_VMAF
-  RANGE_CHECK(extra_cfg, vmaf_resize_factor, 0, 1);
+  RANGE_CHECK(extra_cfg, vmaf_resize_factor, 0, 3);
   RANGE_CHECK(extra_cfg, vmaf_rd_mult, 1, 1000);
   RANGE_CHECK(extra_cfg, tpl_rd_mult, 1, 1000);
   RANGE_CHECK_BOOL(extra_cfg, vmaf_quantization);
@@ -1594,10 +1594,14 @@ static aom_codec_err_t set_encoder_config(AV1EncoderConfig *oxcf,
   oxcf->vmaf_resize_factor = extra_cfg->vmaf_resize_factor;
 
   oxcf->vmaf_rdo_bsize = (extra_cfg->vmaf_resize_factor == 0)
-                               ? BLOCK_32X32
+                               ? BLOCK_64X64
                                : (extra_cfg->vmaf_resize_factor == 1)
-                                     ? BLOCK_16X16
-                                     : BLOCK_32X32;
+                                     ? BLOCK_32X32
+                                     : (extra_cfg->vmaf_resize_factor == 2)
+                                         ? BLOCK_16X16
+                                         : (extra_cfg->vmaf_resize_factor == 3)
+                                            ? BLOCK_8X8
+                                            : BLOCK_32X32;
 
   oxcf->vmaf_rd_mult = extra_cfg->vmaf_rd_mult;
 #endif
