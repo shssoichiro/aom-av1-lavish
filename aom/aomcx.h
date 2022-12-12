@@ -1534,15 +1534,15 @@ enum aome_enc_control_id {
   AV1E_SET_MAX_CONSEC_FRAME_DROP_CBR = 164,
 
   // ClybPatch -- TODO: Ideally, this should be reworked to be able to be successfully patched without needing to be touched every time there's a new param by other developers.
-  AOME_SET_DQ_MODULATE = AV1E_SET_MAX_CONSEC_FRAME_DROP_CBR + 2,
+  AOME_SET_DQ_MODULATE = AV1E_SET_MAX_CONSEC_FRAME_DROP_CBR + 1,
   /* ClybPatch -- brief Codec control function to set the quantization sharpness parameter,
    * unsigned int parameter.
    *
    * Valid range: 0..7. The default is 0. Values 1-7 will change quantization in favour of block sharpness.
    */
-  AOME_SET_QUANT_SHARPNESS = AV1E_SET_MAX_CONSEC_FRAME_DROP_CBR + 3,
+  AOME_SET_QUANT_SHARPNESS = AOME_SET_DQ_MODULATE + 1,
   // ClybPatch -- Idea thanks to Opmox, sets the TPL model's strength / effectiveness.
-  AOME_SET_DELTA_QINDEX_MULT = AV1E_SET_MAX_CONSEC_FRAME_DROP_CBR + 4,
+  AOME_SET_DELTA_QINDEX_MULT = AOME_SET_DQ_MODULATE + 2,
 
   AOME_SET_DELTA_QINDEX_MULT_POS = AOME_SET_DELTA_QINDEX_MULT + 1,
 
@@ -1586,11 +1586,6 @@ enum aome_enc_control_id {
   AOME_SET_TPL_RD_MULT = AOME_SET_DELTA_QINDEX_MULT + 18,
 
   AOME_SET_BUTTERAUGLI_RESIZE_FACTOR = AOME_SET_DELTA_QINDEX_MULT + 19,
-
-  /*!\brief Codec control function to get the number of operating points. int*
-   * parameter.
-   */
-  AV1E_GET_NUM_OPERATING_POINTS = 156,
 
   // Any new encoder control IDs should be added above.
   // Maximum allowed encoder control ID is 229.
