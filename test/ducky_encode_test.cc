@@ -141,14 +141,14 @@ TEST(DuckyEncodeRCTest, EncodeVideoWithRC) {
   std::vector<aom::GopEncodeInfo> tpl_pass_gop_encode_info_list;
   std::vector<aom::TplGopStats> tpl_gop_stats_list;
   for (const auto &gop_struct : gop_list) {
-    const auto gop_encode_info = qmode_rc.GetTplPassGopEncodeInfo(gop_struct);
+    const auto gop_encode_info =
+        qmode_rc.GetTplPassGopEncodeInfo(gop_struct, firstpass_info);
     ASSERT_TRUE(gop_encode_info.status().ok());
     tpl_pass_gop_encode_info_list.push_back(std::move(*gop_encode_info));
   }
-  ducky_encode.StartEncode(firstpass_info.stats_list);
-  tpl_gop_stats_list =
-      ducky_encode.ComputeTplStats(gop_list, tpl_pass_gop_encode_info_list);
-  ducky_encode.EndEncode();
+
+  tpl_gop_stats_list = ducky_encode.ComputeTplStats(
+      firstpass_info.stats_list, gop_list, tpl_pass_gop_encode_info_list);
 
   std::vector<aom::GopEncodeInfo> final_pass_gop_encode_info_list;
   aom::RefFrameTable ref_frame_table;
@@ -162,8 +162,9 @@ TEST(DuckyEncodeRCTest, EncodeVideoWithRC) {
       lookahead_stats.push_back({ &gop_list[i + lookahead_index],
                                   &tpl_gop_stats_list[i + lookahead_index] });
     }
-    const auto gop_encode_info = qmode_rc.GetGopEncodeInfo(
-        gop_struct, tpl_gop_stats, lookahead_stats, ref_frame_table);
+    const auto gop_encode_info =
+        qmode_rc.GetGopEncodeInfo(gop_struct, tpl_gop_stats, lookahead_stats,
+                                  firstpass_info, ref_frame_table);
     ASSERT_TRUE(gop_encode_info.status().ok());
     ref_frame_table = gop_encode_info.value().final_snapshot;
     final_pass_gop_encode_info_list.push_back(std::move(*gop_encode_info));

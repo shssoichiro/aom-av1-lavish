@@ -16,7 +16,7 @@
 #include "av1/encoder/rdopt.h"
 #include "config/aom_scale_rtcd.h"
 
-static const double kBaselineVmaf = 97.42773;
+static const double kBaselineVmaf = 102.57227;
 
 static double get_layer_value(const double *array, int layer) {
   while (array[layer] < 0.0 && layer > 0) layer--;

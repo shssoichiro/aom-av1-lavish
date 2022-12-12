@@ -310,10 +310,18 @@ static AOM_INLINE int set_rdmult(const AV1_COMP *const cpi,
   const int layer_depth = AOMMIN(gf_group->layer_depth[cpi->gf_frame_index], 6);
 
   int qindex;
+  int deltaq_multiplier = 100;
+  if ((cpi->oxcf.delta_qindex_mult_pos >= 0) && (x->delta_qindex > 0)) {
+    deltaq_multiplier = cpi->oxcf.delta_qindex_mult_pos;
+  } else if ((cpi->oxcf.delta_qindex_mult_neg >= 0) && (x->delta_qindex < 0)) {
+    deltaq_multiplier = cpi->oxcf.delta_qindex_mult_neg;
+  } else {
+    deltaq_multiplier = cpi->oxcf.delta_qindex_mult;
+  }
   if (segment_id >= 0) {
     qindex = av1_get_qindex(&cm->seg, segment_id, cm->quant_params.base_qindex);
   } else {
-    qindex = quant_params->base_qindex + x->rdmult_delta_qindex +
+    qindex = quant_params->base_qindex + (int)round(x->rdmult_delta_qindex * deltaq_multiplier / 100) +
              quant_params->y_dc_delta_q;
   }
 

@@ -34,6 +34,8 @@
 #include "av1/encoder/random.h"
 #include "av1/encoder/ratectrl.h"
 
+#include "config/aom_dsp_rtcd.h"
+
 #define USE_UNRESTRICTED_Q_IN_CQ_MODE 0
 
 // Max rate target for 1080P and below encodes under normal circumstances
@@ -174,11 +176,28 @@ int av1_get_bpmb_enumerator(FRAME_TYPE frame_type,
 
 int av1_rc_bits_per_mb(const AV1_COMP *cpi, FRAME_TYPE frame_type, int qindex,
                        double correction_factor, int accurate_estimate) {
-  (void)accurate_estimate;
   const AV1_COMMON *const cm = &cpi->common;
   const int is_screen_content_type = cpi->is_screen_content_type;
   const aom_bit_depth_t bit_depth = cm->seq_params->bit_depth;
   const double q = av1_convert_qindex_to_q(qindex, bit_depth);
+
+  const int min_dim = AOMMIN(cm->width, cm->height);
+
+  if (frame_type != KEY_FRAME && accurate_estimate) {
+    assert(cpi->rec_sse != UINT64_MAX);
+    const int mbs = cm->mi_params.MBs;
+    const int res = (min_dim < 480) ? 0 : ((min_dim < 720) ? 1 : 2);
+    const double sse_over_q2 = (double)(cpi->rec_sse << BPER_MB_NORMBITS) /
+                               ((double)q * q) / (double)mbs;
+    const double coef[3][2] = {
+      { 0.535, 3000.0 },  // < 480
+      { 0.590, 3000.0 },  // < 720
+      { 0.485, 1000.0 }   // 720
+    };
+    int bits = (int)(coef[res][0] * sse_over_q2 + coef[res][1]);
+    return (int)(bits * correction_factor);
+  }
+
   const int enumerator =
       av1_get_bpmb_enumerator(frame_type, is_screen_content_type);
   assert(correction_factor <= MAX_BPB_FACTOR &&
@@ -194,7 +213,8 @@ int av1_estimate_bits_at_q(const AV1_COMP *cpi, int q,
   const FRAME_TYPE frame_type = cm->current_frame.frame_type;
   const int mbs = cm->mi_params.MBs;
   const int bpm =
-      (int)(av1_rc_bits_per_mb(cpi, frame_type, q, correction_factor, 0));
+      (int)(av1_rc_bits_per_mb(cpi, frame_type, q, correction_factor,
+                               cpi->sf.hl_sf.accurate_bit_estimate));
   return AOMMAX(FRAME_OVERHEAD_BITS,
                 (int)((uint64_t)bpm * mbs) >> BPER_MB_NORMBITS);
 }
@@ -680,8 +700,8 @@ void av1_rc_update_rate_correction_factors(AV1_COMP *cpi, int is_encode_stage,
   // Do not update the rate factors for arf overlay frames.
   if (cpi->rc.is_src_frame_alt_ref) return;
 
-  // Dont update rate correction factors here on scene changes as
-  // it is already reset av1_encodedframe_overshoot_cbr(),
+  // Don't update rate correction factors here on scene changes as
+  // it is already reset in av1_encodedframe_overshoot_cbr(),
   // but reset variables related to previous frame q and size.
   // Note that the counter of frames since the last scene change
   // is only valid when cyclic refresh mode is enabled and that
@@ -789,7 +809,8 @@ static int get_bits_per_mb(const AV1_COMP *cpi, int use_cyclic_refresh,
   return use_cyclic_refresh
              ? av1_cyclic_refresh_rc_bits_per_mb(cpi, q, correction_factor)
              : av1_rc_bits_per_mb(cpi, cm->current_frame.frame_type, q,
-                                  correction_factor, 0);
+                                  correction_factor,
+                                  cpi->sf.hl_sf.accurate_bit_estimate);
 }
 
 /*!\brief Searches for a Q index value predicted to give an average macro
@@ -1982,6 +2003,63 @@ static int rc_pick_q_and_bounds(const AV1_COMP *cpi, int width, int height,
   return q;
 }
 
+static void rc_compute_variance_onepass_rt(AV1_COMP *cpi) {
+  AV1_COMMON *const cm = &cpi->common;
+  YV12_BUFFER_CONFIG const *const unscaled_src = cpi->unscaled_source;
+  if (unscaled_src == NULL) return;
+
+  const uint8_t *src_y = unscaled_src->y_buffer;
+  const int src_ystride = unscaled_src->y_stride;
+  const YV12_BUFFER_CONFIG *yv12 = get_ref_frame_yv12_buf(cm, LAST_FRAME);
+  const uint8_t *pre_y = yv12->buffers[0];
+  const int pre_ystride = yv12->strides[0];
+
+  // TODO(yunqing): support scaled reference frames.
+  if (cpi->scaled_ref_buf[LAST_FRAME - 1]) return;
+
+  const int num_mi_cols = cm->mi_params.mi_cols;
+  const int num_mi_rows = cm->mi_params.mi_rows;
+  const BLOCK_SIZE bsize = BLOCK_64X64;
+  int num_samples = 0;
+  // sse is computed on 64x64 blocks
+  const int sb_size_by_mb = (cm->seq_params->sb_size == BLOCK_128X128)
+                                ? (cm->seq_params->mib_size >> 1)
+                                : cm->seq_params->mib_size;
+  const int sb_cols = (num_mi_cols + sb_size_by_mb - 1) / sb_size_by_mb;
+  const int sb_rows = (num_mi_rows + sb_size_by_mb - 1) / sb_size_by_mb;
+
+  uint64_t fsse = 0;
+  cpi->rec_sse = 0;
+
+  for (int sbi_row = 0; sbi_row < sb_rows; ++sbi_row) {
+    for (int sbi_col = 0; sbi_col < sb_cols; ++sbi_col) {
+      unsigned int sse;
+      uint8_t src[64 * 64] = { 0 };
+      // Apply 4x4 block averaging/denoising on source frame.
+      for (int i = 0; i < 64; i += 4) {
+        for (int j = 0; j < 64; j += 4) {
+          const unsigned int avg =
+              aom_avg_4x4(src_y + i * src_ystride + j, src_ystride);
+
+          for (int m = 0; m < 4; ++m) {
+            for (int n = 0; n < 4; ++n) src[i * 64 + j + m * 64 + n] = avg;
+          }
+        }
+      }
+
+      cpi->ppi->fn_ptr[bsize].vf(src, 64, pre_y, pre_ystride, &sse);
+      fsse += sse;
+      num_samples++;
+      src_y += 64;
+      pre_y += 64;
+    }
+    src_y += (src_ystride << 6) - (sb_cols << 6);
+    pre_y += (pre_ystride << 6) - (sb_cols << 6);
+  }
+  assert(num_samples > 0);
+  if (num_samples > 0) cpi->rec_sse = fsse;
+}
+
 int av1_rc_pick_q_and_bounds(AV1_COMP *cpi, int width, int height, int gf_index,
                              int *bottom_index, int *top_index) {
   PRIMARY_RATE_CONTROL *const p_rc = &cpi->ppi->p_rc;
@@ -1993,6 +2071,12 @@ int av1_rc_pick_q_and_bounds(AV1_COMP *cpi, int width, int height, int gf_index,
        gf_group->update_type[gf_index] == ARF_UPDATE) &&
       has_no_stats_stage(cpi)) {
     if (cpi->oxcf.rc_cfg.mode == AOM_CBR) {
+      // TODO(yunqing): the results could be used for encoder optimization.
+      cpi->rec_sse = UINT64_MAX;
+      if (cpi->sf.hl_sf.accurate_bit_estimate &&
+          cpi->common.current_frame.frame_type != KEY_FRAME)
+        rc_compute_variance_onepass_rt(cpi);
+
       q = rc_pick_q_and_bounds_no_stats_cbr(cpi, width, height, bottom_index,
                                             top_index);
       // preserve copy of active worst quality selected.
@@ -2100,6 +2184,7 @@ void av1_rc_postencode_update(AV1_COMP *cpi, uint64_t bytes_used) {
         ROUND_POWER_OF_TWO(3 * p_rc->avg_frame_qindex[KEY_FRAME] + qindex, 2);
   } else {
     if ((cpi->ppi->use_svc && cpi->oxcf.rc_cfg.mode == AOM_CBR) ||
+        cpi->rc.rtc_external_ratectrl ||
         (!rc->is_src_frame_alt_ref &&
          !(refresh_frame->golden_frame || is_intrnl_arf ||
            refresh_frame->alt_ref_frame))) {
@@ -2201,8 +2286,10 @@ void av1_rc_postencode_update(AV1_COMP *cpi, uint64_t bytes_used) {
 void av1_rc_postencode_update_drop_frame(AV1_COMP *cpi) {
   // Update buffer level with zero size, update frame counters, and return.
   update_buffer_level(cpi, 0);
-  cpi->rc.frames_since_key++;
-  cpi->rc.frames_to_key--;
+  if (cpi->svc.spatial_layer_id == cpi->svc.number_spatial_layers - 1) {
+    cpi->rc.frames_since_key++;
+    cpi->rc.frames_to_key--;
+  }
   cpi->rc.rc_2_frame = 0;
   cpi->rc.rc_1_frame = 0;
   cpi->rc.prev_avg_frame_bandwidth = cpi->rc.avg_frame_bandwidth;
@@ -2532,7 +2619,7 @@ int av1_calc_iframe_target_size_one_pass_cbr(const AV1_COMP *cpi) {
     }
   } else {
     int kf_boost = 32;
-    double framerate = cpi->framerate;
+    int framerate = (int)round(cpi->framerate);
 
     kf_boost = AOMMAX(kf_boost, (int)(2 * framerate - 16));
     if (rc->frames_since_key < framerate / 2) {
@@ -2822,92 +2909,89 @@ static void rc_scene_detection_onepass_rt(AV1_COMP *cpi,
   rc->percent_blocks_with_motion = 0;
   rc->max_block_source_sad = 0;
   rc->prev_avg_source_sad = rc->avg_source_sad;
-  if (src_width == last_src_width && src_height == last_src_height) {
-    int num_mi_cols = cm->mi_params.mi_cols;
-    int num_mi_rows = cm->mi_params.mi_rows;
-    if (cpi->svc.number_spatial_layers > 1) {
-      num_mi_cols = cpi->svc.mi_cols_full_resoln;
-      num_mi_rows = cpi->svc.mi_rows_full_resoln;
-    }
-    int num_zero_temp_sad = 0;
-    uint32_t min_thresh = 10000;
-    if (cpi->oxcf.tune_cfg.content != AOM_CONTENT_SCREEN) min_thresh = 100000;
-    const BLOCK_SIZE bsize = BLOCK_64X64;
-    // Loop over sub-sample of frame, compute average sad over 64x64 blocks.
-    uint64_t avg_sad = 0;
-    uint64_t tmp_sad = 0;
-    int num_samples = 0;
-    const int thresh = 6;
-    // SAD is computed on 64x64 blocks
-    const int sb_size_by_mb = (cm->seq_params->sb_size == BLOCK_128X128)
-                                  ? (cm->seq_params->mib_size >> 1)
-                                  : cm->seq_params->mib_size;
-    const int sb_cols = (num_mi_cols + sb_size_by_mb - 1) / sb_size_by_mb;
-    const int sb_rows = (num_mi_rows + sb_size_by_mb - 1) / sb_size_by_mb;
-    uint64_t sum_sq_thresh = 10000;  // sum = sqrt(thresh / 64*64)) ~1.5
-    int num_low_var_high_sumdiff = 0;
-    int light_change = 0;
-    // Flag to check light change or not.
-    const int check_light_change = 0;
-    // Store blkwise SAD for later use
-    if (width == cm->render_width && height == cm->render_height) {
-      if (cpi->src_sad_blk_64x64 == NULL) {
-        CHECK_MEM_ERROR(
-            cm, cpi->src_sad_blk_64x64,
-            (uint64_t *)aom_calloc(sb_cols * sb_rows,
-                                   sizeof(*cpi->src_sad_blk_64x64)));
-      }
-    }
-    for (int sbi_row = 0; sbi_row < sb_rows; ++sbi_row) {
-      for (int sbi_col = 0; sbi_col < sb_cols; ++sbi_col) {
-        tmp_sad = cpi->ppi->fn_ptr[bsize].sdf(src_y, src_ystride, last_src_y,
-                                              last_src_ystride);
-        if (cpi->src_sad_blk_64x64 != NULL)
-          cpi->src_sad_blk_64x64[sbi_col + sbi_row * sb_cols] = tmp_sad;
-        if (check_light_change) {
-          unsigned int sse, variance;
-          variance = cpi->ppi->fn_ptr[bsize].vf(src_y, src_ystride, last_src_y,
-                                                last_src_ystride, &sse);
-          // Note: sse - variance = ((sum * sum) >> 12)
-          // Detect large lighting change.
-          if (variance < (sse >> 1) && (sse - variance) > sum_sq_thresh) {
-            num_low_var_high_sumdiff++;
-          }
-        }
-        avg_sad += tmp_sad;
-        num_samples++;
-        if (tmp_sad == 0) num_zero_temp_sad++;
-        if (tmp_sad > rc->max_block_source_sad)
-          rc->max_block_source_sad = tmp_sad;
-
-        src_y += 64;
-        last_src_y += 64;
-      }
-      src_y += (src_ystride << 6) - (sb_cols << 6);
-      last_src_y += (last_src_ystride << 6) - (sb_cols << 6);
-    }
-    if (check_light_change && num_samples > 0 &&
-        num_low_var_high_sumdiff > (num_samples >> 1))
-      light_change = 1;
-    if (num_samples > 0) avg_sad = avg_sad / num_samples;
-    // Set high_source_sad flag if we detect very high increase in avg_sad
-    // between current and previous frame value(s). Use minimum threshold
-    // for cases where there is small change from content that is completely
-    // static.
-    if (!light_change &&
-        avg_sad >
-            AOMMAX(min_thresh, (unsigned int)(rc->avg_source_sad * thresh)) &&
-        rc->frames_since_key > 1 + cpi->svc.number_spatial_layers &&
-        num_zero_temp_sad < 3 * (num_samples >> 2))
-      rc->high_source_sad = 1;
-    else
-      rc->high_source_sad = 0;
-    rc->avg_source_sad = (3 * rc->avg_source_sad + avg_sad) >> 2;
-    rc->frame_source_sad = avg_sad;
-    if (num_samples > 0)
-      rc->percent_blocks_with_motion =
-          ((num_samples - num_zero_temp_sad) * 100) / num_samples;
+  int num_mi_cols = cm->mi_params.mi_cols;
+  int num_mi_rows = cm->mi_params.mi_rows;
+  if (cpi->svc.number_spatial_layers > 1) {
+    num_mi_cols = cpi->svc.mi_cols_full_resoln;
+    num_mi_rows = cpi->svc.mi_rows_full_resoln;
   }
+  int num_zero_temp_sad = 0;
+  uint32_t min_thresh = 10000;
+  if (cpi->oxcf.tune_cfg.content != AOM_CONTENT_SCREEN) min_thresh = 100000;
+  const BLOCK_SIZE bsize = BLOCK_64X64;
+  // Loop over sub-sample of frame, compute average sad over 64x64 blocks.
+  uint64_t avg_sad = 0;
+  uint64_t tmp_sad = 0;
+  int num_samples = 0;
+  const int thresh = 6;
+  // SAD is computed on 64x64 blocks
+  const int sb_size_by_mb = (cm->seq_params->sb_size == BLOCK_128X128)
+                                ? (cm->seq_params->mib_size >> 1)
+                                : cm->seq_params->mib_size;
+  const int sb_cols = (num_mi_cols + sb_size_by_mb - 1) / sb_size_by_mb;
+  const int sb_rows = (num_mi_rows + sb_size_by_mb - 1) / sb_size_by_mb;
+  uint64_t sum_sq_thresh = 10000;  // sum = sqrt(thresh / 64*64)) ~1.5
+  int num_low_var_high_sumdiff = 0;
+  int light_change = 0;
+  // Flag to check light change or not.
+  const int check_light_change = 0;
+  // Store blkwise SAD for later use
+  if (width == cm->render_width && height == cm->render_height) {
+    if (cpi->src_sad_blk_64x64 == NULL) {
+      CHECK_MEM_ERROR(cm, cpi->src_sad_blk_64x64,
+                      (uint64_t *)aom_calloc(sb_cols * sb_rows,
+                                             sizeof(*cpi->src_sad_blk_64x64)));
+    }
+  }
+  for (int sbi_row = 0; sbi_row < sb_rows; ++sbi_row) {
+    for (int sbi_col = 0; sbi_col < sb_cols; ++sbi_col) {
+      tmp_sad = cpi->ppi->fn_ptr[bsize].sdf(src_y, src_ystride, last_src_y,
+                                            last_src_ystride);
+      if (cpi->src_sad_blk_64x64 != NULL)
+        cpi->src_sad_blk_64x64[sbi_col + sbi_row * sb_cols] = tmp_sad;
+      if (check_light_change) {
+        unsigned int sse, variance;
+        variance = cpi->ppi->fn_ptr[bsize].vf(src_y, src_ystride, last_src_y,
+                                              last_src_ystride, &sse);
+        // Note: sse - variance = ((sum * sum) >> 12)
+        // Detect large lighting change.
+        if (variance < (sse >> 1) && (sse - variance) > sum_sq_thresh) {
+          num_low_var_high_sumdiff++;
+        }
+      }
+      avg_sad += tmp_sad;
+      num_samples++;
+      if (tmp_sad == 0) num_zero_temp_sad++;
+      if (tmp_sad > rc->max_block_source_sad)
+        rc->max_block_source_sad = tmp_sad;
+
+      src_y += 64;
+      last_src_y += 64;
+    }
+    src_y += (src_ystride << 6) - (sb_cols << 6);
+    last_src_y += (last_src_ystride << 6) - (sb_cols << 6);
+  }
+  if (check_light_change && num_samples > 0 &&
+      num_low_var_high_sumdiff > (num_samples >> 1))
+    light_change = 1;
+  if (num_samples > 0) avg_sad = avg_sad / num_samples;
+  // Set high_source_sad flag if we detect very high increase in avg_sad
+  // between current and previous frame value(s). Use minimum threshold
+  // for cases where there is small change from content that is completely
+  // static.
+  if (!light_change &&
+      avg_sad >
+          AOMMAX(min_thresh, (unsigned int)(rc->avg_source_sad * thresh)) &&
+      rc->frames_since_key > 1 + cpi->svc.number_spatial_layers &&
+      num_zero_temp_sad < 3 * (num_samples >> 2))
+    rc->high_source_sad = 1;
+  else
+    rc->high_source_sad = 0;
+  rc->avg_source_sad = (3 * rc->avg_source_sad + avg_sad) >> 2;
+  rc->frame_source_sad = avg_sad;
+  if (num_samples > 0)
+    rc->percent_blocks_with_motion =
+        ((num_samples - num_zero_temp_sad) * 100) / num_samples;
   // Scene detection is only on base SLO, and using full/orignal resolution.
   // Pass the state to the upper spatial layers.
   if (cpi->svc.number_spatial_layers > 1) {

@@ -412,12 +412,11 @@ if (aom_config("CONFIG_AV1_ENCODER") eq "yes") {
 
   add_proto qw/void av1_quantize_b/, "const tran_low_t *coeff_ptr, intptr_t n_coeffs, const int16_t *zbin_ptr, const int16_t *round_ptr, const int16_t *quant_ptr, const int16_t *quant_shift_ptr, tran_low_t *qcoeff_ptr, tran_low_t *dqcoeff_ptr, const int16_t *dequant_ptr, uint16_t *eob_ptr, const int16_t *scan, const int16_t *iscan, const qm_val_t * qm_ptr, const qm_val_t * iqm_ptr, int log_scale";
 
-  add_proto qw/void av1_calc_indices_dim1/, "const int *data, const int *centroids, uint8_t *indices, int n, int k";
+  add_proto qw/void av1_calc_indices_dim1/, "const int16_t *data, const int16_t *centroids, uint8_t *indices, int64_t *total_dist, int n, int k";
   specialize qw/av1_calc_indices_dim1 sse2 avx2/;
 
-  # TODO(any): Disable av1_calc_indices_dim2 sse2 version due to c/SIMD mismatch. Re-enable it after mismatch is fixed.
-  add_proto qw/void av1_calc_indices_dim2/, "const int *data, const int *centroids, uint8_t *indices, int n, int k";
-  specialize qw/av1_calc_indices_dim2 avx2/;
+  add_proto qw/void av1_calc_indices_dim2/, "const int16_t *data, const int16_t *centroids, uint8_t *indices, int64_t *total_dist, int n, int k";
+  specialize qw/av1_calc_indices_dim2 sse2 avx2/;
 
   # ENCODEMB INVOKE
   if (aom_config("CONFIG_AV1_HIGHBITDEPTH") eq "yes") {
@@ -554,11 +553,6 @@ specialize qw/av1_warp_affine sse4_1 avx2 neon/;
 
 add_proto qw/int64_t av1_calc_frame_error/, "const uint8_t *const ref, int stride, const uint8_t *const dst, int p_width, int p_height, int p_stride";
 specialize qw/av1_calc_frame_error sse2 avx2/;
-
-if (aom_config("CONFIG_AV1_ENCODER") eq "yes") {
-  add_proto qw/double av1_compute_cross_correlation/, "unsigned char *im1, int stride1, int x1, int y1, unsigned char *im2, int stride2, int x2, int y2";
-  specialize qw/av1_compute_cross_correlation sse4_1 avx2/;
-}
 
 # LOOP_RESTORATION functions
 add_proto qw/void av1_apply_selfguided_restoration/, "const uint8_t *dat, int width, int height, int stride, int eps, const int *xqd, uint8_t *dst, int dst_stride, int32_t *tmpbuf, int bit_depth, int highbd";

@@ -3471,12 +3471,11 @@ static AOM_INLINE void decode_mt_init(AV1Decoder *pbi) {
     CHECK_MEM_ERROR(cm, pbi->tile_workers,
                     aom_malloc(num_threads * sizeof(*pbi->tile_workers)));
     CHECK_MEM_ERROR(cm, pbi->thread_data,
-                    aom_malloc(num_threads * sizeof(*pbi->thread_data)));
+                    aom_calloc(num_threads, sizeof(*pbi->thread_data)));
 
     for (worker_idx = 0; worker_idx < num_threads; ++worker_idx) {
       AVxWorker *const worker = &pbi->tile_workers[worker_idx];
       DecWorkerData *const thread_data = pbi->thread_data + worker_idx;
-      ++pbi->num_workers;
 
       winterface->init(worker);
       worker->thread_name = "aom tile worker";
@@ -3484,6 +3483,7 @@ static AOM_INLINE void decode_mt_init(AV1Decoder *pbi) {
         aom_internal_error(&pbi->error, AOM_CODEC_ERROR,
                            "Tile decoder thread creation failed");
       }
+      ++pbi->num_workers;
 
       if (worker_idx != 0) {
         // Allocate thread data.

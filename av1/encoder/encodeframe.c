@@ -251,8 +251,8 @@ static AOM_INLINE void setup_delta_q(AV1_COMP *const cpi, ThreadData *td,
     const int sb_index = sb_row * sb_cols + sb_col;
     current_qindex =
         cpi->ducky_encode_info.frame_info.superblock_encode_qindex[sb_index];
-  } else if (cpi->oxcf.q_cfg.deltaq_mode == DELTA_Q_PERCEPTUAL && cpi->oxcf.dq_modulate == 1) {
-    if (DELTA_Q_PERCEPTUAL_MODULATION == 1) {
+  } else if (cpi->oxcf.q_cfg.deltaq_mode == DELTA_Q_PERCEPTUAL) {
+    if (DELTA_Q_PERCEPTUAL_MODULATION == 1 && cpi->oxcf.dq_modulate == 1) {
       const int block_wavelet_energy_level =
           av1_block_wavelet_energy_level(cpi, x, sb_size);
       x->sb_energy_level = block_wavelet_energy_level;
