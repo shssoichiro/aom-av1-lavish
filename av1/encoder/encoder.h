@@ -1118,6 +1118,8 @@ typedef struct AV1EncoderConfig {
 
   int butteraugli_rd_mult;
 
+  int butteraugli_quant_mult;
+
   int butteraugli_resize_factor;
 #endif
 

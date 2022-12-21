@@ -10,20 +10,19 @@
  */
 
 #include <assert.h>
-#include <jxl/butteraugli.h>
-#include <jxl/thread_parallel_runner.h>
 
 #include "aom_dsp/butteraugli.h"
 #include "aom_mem/aom_mem.h"
 #include "aom_ports/mem.h"
+#include "av1/encoder/encoder_utils.h"
 #include "third_party/libyuv/include/libyuv/convert_argb.h"
 
-int aom_calc_butteraugli(const YV12_BUFFER_CONFIG *source,
+int aom_calc_butteraugli(AV1_COMP *cpi, const YV12_BUFFER_CONFIG *source,
                          const YV12_BUFFER_CONFIG *distorted, int bit_depth,
                          aom_matrix_coefficients_t matrix_coefficients,
                          aom_color_range_t color_range, float *dist_map, int target_intensity, int hf_asymmetry) {
   (void)bit_depth;
-  assert(bit_depth <= 10);
+  assert(bit_depth <= 12);
   const int width = source->y_crop_width;
   const int height = source->y_crop_height;
   const int ss_x = source->subsampling_x;
@@ -115,7 +114,7 @@ int aom_calc_butteraugli(const YV12_BUFFER_CONFIG *source,
   }
   float hf_asym_val = (float)hf_asymmetry / 10.0f;
   JxlPixelFormat pixel_format = { 4, JXL_TYPE_UINT8, JXL_NATIVE_ENDIAN, 0 };
-  if (bit_depth == 10) {
+  if (bit_depth == 10 || bit_depth == 12) {
     pixel_format.data_type = JXL_TYPE_UINT16;
   }
   JxlButteraugliApi *api = JxlButteraugliApiCreate(NULL);
@@ -131,6 +130,7 @@ int aom_calc_butteraugli(const YV12_BUFFER_CONFIG *source,
   const float *distmap = NULL;
   uint32_t row_stride;
   JxlButteraugliResultGetDistmap(result, &distmap, &row_stride);
+  cpi->butteraugli_info.distance = JxlButteraugliResultGetDistance(result, 8.0f);
   if (distmap == NULL) {
     JxlButteraugliApiDestroy(api);
     JxlButteraugliResultDestroy(result);

@@ -736,6 +736,9 @@ const av1_codec_arg_definitions_t g_av1_codec_arg_defs = {
   .butteraugli_rd_mult = ARG_DEF(NULL, "butteraugli-rd-mult", 1,
                        "Multiplier for butteraugli tunes rdmult "
                                   "(Meant for hyper-tuning, only active with tunes that utilize butteraugli rdo, defaults to 100)"),
+  .butteraugli_quant_mult = ARG_DEF(NULL, "butteraugli-quant-mult", 1,
+                       "Multiplier for butteraugli quantization (0 default, only for Butteraugli tunes)\n "
+                        "                                        (Set to a value higher than 0 to enable butteraugli quantization)"),
   .butteraugli_resize_factor = ARG_DEF(NULL, "butteraugli-resize-factor", 1,
                        "Change internal resizing for faster calculations with Butteraugli tunes\n "
                        "                                        0 - Do not resize, 1 - Resize to half res (Default), 2 - Resize to quarter res."),

@@ -24,6 +24,11 @@ typedef struct {
   double *rdmult_scaling_factors;
   YV12_BUFFER_CONFIG source, resized_source;
   bool recon_set;
+  float total_dbutteraugli;
+  // Stores the origial qindex before scaling.
+  int original_qindex;
+  float distance;
+  double blk_count;
 } TuneButteraugliInfo;
 
 struct AV1_COMP;
@@ -38,6 +43,8 @@ void av1_setup_butteraugli_source(struct AV1_COMP *cpi);
 // and Butteraugli.
 void av1_setup_butteraugli_rdmult_and_restore_source(struct AV1_COMP *cpi,
                                                      double K);
+
+int av1_get_butteraugli_base_qindex(struct AV1_COMP *cpi, int current_qindex, int strength);
 
 void av1_setup_butteraugli_rdmult(struct AV1_COMP *cpi);
 

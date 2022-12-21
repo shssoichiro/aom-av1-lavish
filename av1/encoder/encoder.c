@@ -1485,6 +1485,8 @@ AV1_COMP *av1_create_compressor(AV1_PRIMARY *ppi, const AV1EncoderConfig *oxcf,
            sizeof(cpi->butteraugli_info.source));
     memset(&cpi->butteraugli_info.resized_source, 0,
            sizeof(cpi->butteraugli_info.resized_source));
+    cpi->butteraugli_info.original_qindex = -1;
+    cpi->butteraugli_info.distance = -1.0f;
     cpi->butteraugli_info.recon_set = false;
   }
 #endif
@@ -2777,6 +2779,7 @@ static int encode_with_recode_loop(AV1_COMP *cpi, size_t *size, uint8_t *dest) {
 #if CONFIG_TUNE_BUTTERAUGLI
   cpi->butteraugli_info.recon_set = false;
   int original_q = 0;
+  bool butteraugli_quantization = cpi->oxcf.butteraugli_quant_mult > 0;
 #endif
 
   cpi->num_frame_recode = 0;
@@ -2815,7 +2818,12 @@ static int encode_with_recode_loop(AV1_COMP *cpi, size_t *size, uint8_t *dest) {
         q = 96;
         av1_setup_butteraugli_source(cpi);
       } else {
-        q = original_q;
+        if (butteraugli_quantization) { // Require a loop/cycle before doing q adjustment, as we use dbutter from butteraugli tuning for free quant
+          cpi->butteraugli_info.original_qindex = q;
+          q = av1_get_butteraugli_base_qindex(cpi, original_q, 100);
+        } else {
+          q = original_q;
+        }
       }
     }
 #endif
@@ -3031,6 +3039,9 @@ static int encode_with_recode_loop(AV1_COMP *cpi, size_t *size, uint8_t *dest) {
       q = cpi->vmaf_info.original_qindex;
     }
 #endif
+    if (butteraugli_quantization) {
+      q = cpi->butteraugli_info.original_qindex;
+    }
     if (allow_recode) {
       // Update q and decide whether to do a recode loop
       recode_loop_update_q(cpi, &loop, &q, &q_low, &q_high, top_index,
@@ -3039,16 +3050,16 @@ static int encode_with_recode_loop(AV1_COMP *cpi, size_t *size, uint8_t *dest) {
     }
 
 #if CONFIG_TUNE_BUTTERAUGLI
-    if (loop_count <= 1 && (oxcf->tune_cfg.tuning == AOM_TUNE_BUTTERAUGLI ||
+    if (loop_count == 0 && (oxcf->tune_cfg.tuning == AOM_TUNE_BUTTERAUGLI ||
         oxcf->tune_cfg.tuning == AOM_TUNE_LAVISH ||
         oxcf->tune_cfg.tuning == AOM_TUNE_EXPERIMENTAL)) {
-      if (loop_count == 0) loop = 1;
-      if (cpi->oxcf.enable_experimental_psy == 1) loop = 1;
+      loop = 1;
       if (oxcf->tune_cfg.tuning == AOM_TUNE_LAVISH || oxcf->tune_cfg.tuning == AOM_TUNE_EXPERIMENTAL) {
         av1_setup_butteraugli_rdmult_and_restore_source(cpi, 0.0);
       } else {
         av1_setup_butteraugli_rdmult_and_restore_source(cpi, 0.4);
       }
+      //printf("distance: %f\n", cpi->butteraugli_info.distance);
     }
 #endif
 
