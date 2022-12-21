@@ -252,6 +252,7 @@ typedef struct av1_codec_arg_definitions {
   arg_def_t butteraugli_hf_asymmetry;
   arg_def_t butteraugli_rd_mult;
   arg_def_t butteraugli_quant_mult;
+  arg_def_t butteraugli_loop_count;
   arg_def_t butteraugli_resize_factor;
 #endif
   arg_def_t loopfilter_sharpness;

@@ -257,6 +257,7 @@ static const int av1_arg_ctrl_map[] = { AOME_SET_CPUUSED,
                                         AOME_SET_BUTTERAUGLI_HF_ASYMMETRY,
                                         AOME_SET_BUTTERAUGLI_RD_MULT,
                                         AOME_SET_BUTTERAUGLI_QUANT_MULT,
+                                        AOME_SET_BUTTERAUGLI_LOOP_COUNT,
                                         AOME_SET_BUTTERAUGLI_RESIZE_FACTOR,
 #endif
                                         AOME_SET_LOOPFILTER_SHARPNESS,
@@ -490,6 +491,7 @@ const arg_def_t *av1_ctrl_args[] = {
   &g_av1_codec_arg_defs.butteraugli_hf_asymmetry,
   &g_av1_codec_arg_defs.butteraugli_rd_mult,
   &g_av1_codec_arg_defs.butteraugli_quant_mult,
+  &g_av1_codec_arg_defs.butteraugli_loop_count,
   &g_av1_codec_arg_defs.butteraugli_resize_factor,
 #endif
   &g_av1_codec_arg_defs.loopfilter_sharpness,

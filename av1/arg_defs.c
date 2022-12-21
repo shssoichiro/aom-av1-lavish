@@ -739,6 +739,9 @@ const av1_codec_arg_definitions_t g_av1_codec_arg_defs = {
   .butteraugli_quant_mult = ARG_DEF(NULL, "butteraugli-quant-mult", 1,
                        "Multiplier for butteraugli quantization (0 default, only for Butteraugli tunes)\n "
                         "                                        (Set to a value higher than 0 to enable butteraugli quantization)"),
+  .butteraugli_loop_count = ARG_DEF(NULL, "butteraugli-loop-count", 1,
+                       "How many frame recode loops should be forced to re-adjust via Butteraugli (0 default, only for Butteraugli tunes)\n "
+                        "                                        (Set to a value higher than 0 to enable butteraugli looping)"),
   .butteraugli_resize_factor = ARG_DEF(NULL, "butteraugli-resize-factor", 1,
                        "Change internal resizing for faster calculations with Butteraugli tunes\n "
                        "                                        0 - Do not resize, 1 - Resize to half res (Default), 2 - Resize to quarter res."),

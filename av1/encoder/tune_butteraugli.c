@@ -409,8 +409,8 @@ int av1_get_butteraugli_base_qindex(AV1_COMP *cpi, int current_qindex, int stren
   const AV1_COMMON *const cm = &cpi->common;
 
   double frame_mult = (double)cpi->butteraugli_info.total_dbutteraugli / cpi->butteraugli_info.blk_count;
-  printf("total_dbut: %f   frame_mult: %f\n", cpi->butteraugli_info.total_dbutteraugli, frame_mult);
-  frame_mult = AOMMIN(frame_mult, 10.0);
+  //printf("total_dbut: %f   frame_mult: %f\n", cpi->butteraugli_info.total_dbutteraugli, frame_mult);
+  //frame_mult = AOMMIN(frame_mult, 10.0);
   //frame_mult = AOMMAX(frame_mult, 0.4);
   /*if (cpi->oxcf.enable_experimental_psy == 0) {
     frame_mult = 1.0 + (1.0 - frame_mult);
