@@ -1472,7 +1472,7 @@ AV1_COMP *av1_create_compressor(AV1_PRIMARY *ppi, const AV1EncoderConfig *oxcf,
 
 #if CONFIG_TUNE_BUTTERAUGLI
   {
-    const BLOCK_SIZE butteraugli_rdo_bsize = BLOCK_16X16;
+    const BLOCK_SIZE butteraugli_rdo_bsize = BLOCK_32X32;
     const int w = mi_size_wide[butteraugli_rdo_bsize];
     const int h = mi_size_high[butteraugli_rdo_bsize];
     const int num_cols = (mi_params->mi_cols + w - 1) / w;
@@ -2810,24 +2810,21 @@ static int encode_with_recode_loop(AV1_COMP *cpi, size_t *size, uint8_t *dest) {
 
 #if CONFIG_TUNE_BUTTERAUGLI
     if (oxcf->tune_cfg.tuning == AOM_TUNE_BUTTERAUGLI || oxcf->tune_cfg.tuning == AOM_TUNE_LAVISH || oxcf->tune_cfg.tuning == AOM_TUNE_EXPERIMENTAL) {
-      if (loop_count <= cpi->oxcf.butteraugli_loop_count) {
-        cpi->butteraugli_info.original_qindex = q;
-        if (loop_count == 0) {
-          q = 96;
+      if (loop_count == 0) { // If there hasn't been a loop;
+        av1_setup_butteraugli_source(cpi); // Setup the frame for butteraugli
+        cpi->butteraugli_info.original_qindex = q; // set stored original_qindex to q
+        q = 96;// if there hasnt been a loop, set q to 96
+      } else { // if we'have looped at least once
+        if (butteraugli_quantization && loop_count <= cpi->oxcf.butteraugli_loop_count) { // Between 1 and butteraugli-loop-count
+          av1_setup_butteraugli_source(cpi); // setup the recently adjusted frame for re-adjustment with butteraugli
+          cpi->butteraugli_info.original_qindex = av1_get_butteraugli_base_qindex(cpi, cpi->butteraugli_info.original_qindex, cpi->oxcf.butteraugli_quant_mult);
+          q = cpi->butteraugli_info.original_qindex;
+        } else if (butteraugli_quantization) { // Don't setup source on final butteraugli recode, otherwise a messed up frame gets produced.
+          cpi->butteraugli_info.original_qindex = av1_get_butteraugli_base_qindex(cpi, cpi->butteraugli_info.original_qindex, cpi->oxcf.butteraugli_quant_mult);
+          q = cpi->butteraugli_info.original_qindex;
+        } else { // If we don't have butteraugli quantization at all
+          q = cpi->butteraugli_info.original_qindex;
         }
-        av1_setup_butteraugli_source(cpi);
-        // TODO(sdeng): different q here does not make big difference. Use a
-        // faster pass instead.
-        if (loop_count > 0 && butteraugli_quantization) {
-          q = av1_get_butteraugli_base_qindex(cpi, cpi->butteraugli_info.original_qindex, cpi->oxcf.butteraugli_quant_mult);
-        }
-      } else {
-      if (butteraugli_quantization) { // Require a loop/cycle before doing q adjustment, as we use dbutter from butteraugli tuning for free quant
-        cpi->butteraugli_info.original_qindex = q;
-        q = av1_get_butteraugli_base_qindex(cpi, cpi->butteraugli_info.original_qindex, cpi->oxcf.butteraugli_quant_mult);
-      } else {
-        q = cpi->butteraugli_info.original_qindex;
-      }
       }
     }
 #endif
@@ -3034,7 +3031,11 @@ static int encode_with_recode_loop(AV1_COMP *cpi, size_t *size, uint8_t *dest) {
       }
 #endif  // CONFIG_RATECTRL_LOG && CONFIG_THREE_PASS && CONFIG_BITRATE_ACCURACY
     }
-
+#if CONFIG_TUNE_BUTTERAUGLI
+    if (butteraugli_quantization) {
+      q = cpi->butteraugli_info.original_qindex;
+    }
+#endif
 #if CONFIG_TUNE_VMAF
     if ((oxcf->tune_cfg.tuning >= AOM_TUNE_VMAF_WITH_PREPROCESSING &&
        oxcf->tune_cfg.tuning <= AOM_TUNE_VMAF_NEG_MAX_GAIN) ||
@@ -3043,9 +3044,6 @@ static int encode_with_recode_loop(AV1_COMP *cpi, size_t *size, uint8_t *dest) {
       q = cpi->vmaf_info.original_qindex;
     }
 #endif
-    if (butteraugli_quantization) {
-      q = cpi->butteraugli_info.original_qindex;
-    }
     if (allow_recode) {
       // Update q and decide whether to do a recode loop
       recode_loop_update_q(cpi, &loop, &q, &q_low, &q_high, top_index,

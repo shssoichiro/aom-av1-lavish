@@ -45,13 +45,13 @@ static void set_mb_butteraugli_rdmult_scaling(AV1_COMP *cpi,
                                         ? 4
                                         : 2;*/
   const BLOCK_SIZE rdo_bsize = (cpi->oxcf.butteraugli_resize_factor == 0)
-                                ? BLOCK_16X16
+                                ? BLOCK_32X32
                                 : (cpi->oxcf.butteraugli_resize_factor == 1)
-                                      ? BLOCK_8X8
+                                      ? BLOCK_16X16
                                       : (cpi->oxcf.butteraugli_resize_factor == 2)
-                                        ? BLOCK_4X4
-                                        : BLOCK_8X8;
-  const BLOCK_SIZE butteraugli_rdo_bsize = BLOCK_16X16;
+                                        ? BLOCK_8X8
+                                        : BLOCK_16X16;
+  const BLOCK_SIZE butteraugli_rdo_bsize = BLOCK_32X32;
   float *diffmap;
   CHECK_MEM_ERROR(cm, diffmap, aom_malloc(width * height * sizeof(*diffmap)));
   if (!aom_calc_butteraugli(cpi, source, recon, bit_depth,
@@ -66,7 +66,7 @@ static void set_mb_butteraugli_rdmult_scaling(AV1_COMP *cpi,
   const int num_cols = (mi_params->mi_cols + num_mi_w - 1) / num_mi_w;
   const int num_rows = (mi_params->mi_rows + num_mi_h - 1) / num_mi_h;
   const int block_w = mi_size_wide[rdo_bsize];
-  const int block_h = mi_size_wide[rdo_bsize];
+  const int block_h = mi_size_high[rdo_bsize];
   double log_sum = 0.0;
   double blk_count = 0.0;
   cpi->butteraugli_info.blk_count = 0.0;
@@ -90,6 +90,7 @@ static void set_mb_butteraugli_rdmult_scaling(AV1_COMP *cpi,
         float dbutteraugli = 0.0f;
         float dmse = 0.0f;
         float px_count = 0.0f;
+        float qbutteraugli = 0.0f;
 
         // Loop through each pixel in the block
         for (int mi_row = y_start; // mi_row is equal to pixel array's location to resized source
@@ -99,7 +100,9 @@ static void set_mb_butteraugli_rdmult_scaling(AV1_COMP *cpi,
                mi_col < (col + 1) * block_w && mi_col < width;
                mi_col++) {
             //printf("mi_row: %d, mi_col: %d\n", mi_row, mi_col);
-            dbutteraugli += powf(diffmap[mi_row * width + mi_col], 12.0f);
+            float score = diffmap[mi_row * width + mi_col];
+            dbutteraugli += powf(score,2.0f); // Essentially, weigh larger errors higher. Larger power, heavier weight towards the highest value in block.
+            qbutteraugli += powf(score,2.0f);
             //printf("dbutteraugli: %f\n", dbutteraugli);
             float px_diff = CONVERT_TO_SHORTPTR(source->y_buffer)[mi_row * source->y_stride + mi_col] -
                             CONVERT_TO_SHORTPTR(recon->y_buffer)[mi_row * recon->y_stride + mi_col];
@@ -107,7 +110,6 @@ static void set_mb_butteraugli_rdmult_scaling(AV1_COMP *cpi,
             px_count += 1.0f;
           }
         }
-        dbutteraugli = powf(dbutteraugli, 1.0f / 12.0f);
         for (int mi_row = y_start >> ss_y; // mi_row is equal to pixel array's location to resized source
              mi_row < (y_start >> ss_y) + (block_h >> ss_y) && mi_row < (height + ss_y) >> ss_y; // Loop until we hit block's max height or video's max height
              mi_row++) {
@@ -139,8 +141,8 @@ static void set_mb_butteraugli_rdmult_scaling(AV1_COMP *cpi,
                                               rec_buf, recon->y_stride,
                                               &sses[index]);*/
         dmse = dmse / px_count;
-        //dbutteraugli = powf(dbutteraugli, 1.0f / 2.0f);
-        
+        dbutteraugli = powf(dbutteraugli, 1.0f / 2.0f);
+        qbutteraugli = powf(qbutteraugli, 1.0f / 2.0f);
         //printf("dbutteraugli: %f\n", dbutteraugli);
         //printf("pxcount: %f\n", px_count);
         const float eps = 0.01f;
@@ -155,20 +157,20 @@ static void set_mb_butteraugli_rdmult_scaling(AV1_COMP *cpi,
         } else {
           blk_count += 1.0;
           cpi->butteraugli_info.blk_count += 1.0;
-          cpi->butteraugli_info.total_dbutteraugli += dbutteraugli;
+          cpi->butteraugli_info.total_dbutteraugli += powf(qbutteraugli, 1.0f / 2.0f);
           //weight = powf(dmse / dbutteraugli, 1.0f / 12.0f);
           //weight = powf(dmse / dbutteraugli, 1.0f / px_count);
           //weight = log(powf(dbutteraugli, 2.0f));
           //weight = 5*(1 - exp(-0.00625*dbutteraugli))+1.0;
-          //printf("dbutteraugli: %f\n", dbutteraugli);
           if (cpi->oxcf.enable_experimental_psy == 1) {
-            weight = powf(dbutteraugli, 1.0f / 2.0f);
+            weight = (double)(powf(dbutteraugli, 1.0f / 2.0f) - (1.0f - powf(dbutteraugli, 2.0f)) + 1.0f);
+            weight = pow(weight, 1.0 / 4.0);
             //weight = AOMMIN(weight, 5.0);
             //printf("dbutteraugli: %f   weight: %f\n", dbutteraugli, weight);
           } else {
             weight = powf(dmse / dbutteraugli, 1.0f / 4.0f);
             //printf("dmse: %f   dbutteraugli: %f   weight: %f\n", dmse, dbutteraugli, weight);
-            weight = AOMMIN(weight, 5.0);
+            //weight = AOMMIN(weight, 5.0);
           }
           /*if (cpi->oxcf.enable_experimental_psy == 0) {
             weight += K;
@@ -263,7 +265,7 @@ void av1_set_butteraugli_rdmult(const AV1_COMP *cpi, MACROBLOCK *x,
     return;
   }
   const AV1_COMMON *const cm = &cpi->common;
-  const BLOCK_SIZE butteraugli_rdo_bsize = BLOCK_16X16;
+  const BLOCK_SIZE butteraugli_rdo_bsize = BLOCK_32X32;
 
   const int num_mi_w = mi_size_wide[butteraugli_rdo_bsize];
   const int num_mi_h = mi_size_high[butteraugli_rdo_bsize];
@@ -416,7 +418,7 @@ int av1_get_butteraugli_base_qindex(AV1_COMP *cpi, int current_qindex, int stren
     frame_mult = 1.0 + (1.0 - frame_mult);
   }*/
 
-  frame_mult = pow(frame_mult, (double)strength / 100.0);
+  frame_mult = pow(frame_mult, ((double)strength / (cpi->oxcf.butteraugli_loop_count + 1.0)) / 100.0);
   if (cm->current_frame.frame_number == 0 || cpi->oxcf.pass == 1) {
     return current_qindex;
   }
