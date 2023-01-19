@@ -3737,8 +3737,7 @@ static int encode_frame_to_data_rate(AV1_COMP *cpi, size_t *size,
   if (oxcf->tune_cfg.tuning == AOM_TUNE_VMAF_WITHOUT_PREPROCESSING ||
       oxcf->tune_cfg.tuning == AOM_TUNE_VMAF_MAX_GAIN ||
       oxcf->tune_cfg.tuning == AOM_TUNE_VMAF_NEG_MAX_GAIN ||
-      oxcf->tune_cfg.tuning == AOM_TUNE_LAVISH_VMAF_RD ||
-      oxcf->tune_cfg.tuning == AOM_TUNE_EXPERIMENTAL) {
+      oxcf->tune_cfg.tuning == AOM_TUNE_LAVISH_VMAF_RD) {
     av1_set_mb_vmaf_rdmult_scaling(cpi);
   }
 #endif

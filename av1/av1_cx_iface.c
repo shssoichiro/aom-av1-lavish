@@ -882,7 +882,6 @@ static aom_codec_err_t validate_config(aom_codec_alg_priv_t *ctx,
        extra_cfg->tuning <= AOM_TUNE_VMAF_NEG_MAX_GAIN) ||
        extra_cfg->tuning >= AOM_TUNE_IMAGE_PERCEPTUAL_QUALITY_VMAF_PSY_QP ||
        extra_cfg->tuning == AOM_TUNE_LAVISH_VMAF_RD ||
-       extra_cfg->tuning == AOM_TUNE_EXPERIMENTAL ||
        extra_cfg->vmaf_preprocessing >= 1 ||
        extra_cfg->vmaf_quantization == 1) {
     ERROR(
@@ -3046,7 +3045,6 @@ static aom_codec_err_t encoder_encode(aom_codec_alg_priv_t *ctx,
        ctx->extra_cfg.tuning <= AOM_TUNE_VMAF_NEG_MAX_GAIN) ||
        ctx->extra_cfg.tuning >= AOM_TUNE_IMAGE_PERCEPTUAL_QUALITY_VMAF_PSY_QP ||
        ctx->extra_cfg.tuning == AOM_TUNE_LAVISH_VMAF_RD ||
-       ctx->extra_cfg.tuning == AOM_TUNE_EXPERIMENTAL ||
        ctx->extra_cfg.vmaf_preprocessing >= 1 ||
        ctx->extra_cfg.vmaf_quantization == 1) {
     aom_init_vmaf_model(&ppi->cpi->vmaf_info.vmaf_model,

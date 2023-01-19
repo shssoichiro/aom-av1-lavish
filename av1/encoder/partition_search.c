@@ -674,24 +674,7 @@ static void setup_block_rdmult(const AV1_COMP *const cpi, MACROBLOCK *const x,
 
 #if CONFIG_TUNE_BUTTERAUGLI
   if (cpi->oxcf.tune_cfg.tuning == AOM_TUNE_EXPERIMENTAL) {
-    int exp_rdmult = x->rdmult;
-
-    int butteraugli_rdmult = x->rdmult;
-    av1_set_butteraugli_rdmult(cpi, x, bsize, mi_row, mi_col, &butteraugli_rdmult);
-
-    int vmaf_rdmult = x->rdmult;
-    av1_set_vmaf_rdmult(cpi, x, bsize, mi_row, mi_col, &vmaf_rdmult);
-
-    if (cpi->oxcf.enable_experimental_psy == 1) {
-      if (vmaf_rdmult > exp_rdmult) { // if normal rdmult is less than tuned rdmult, obtain mean of both (less distortion tuning)
-        vmaf_rdmult = ((vmaf_rdmult + exp_rdmult) / 2);
-      }
-      if (butteraugli_rdmult > exp_rdmult) {
-        butteraugli_rdmult = ((butteraugli_rdmult + exp_rdmult) / 2);
-      }
-    }
-    exp_rdmult = (int) (((int64_t)(vmaf_rdmult * 2.5) + (int64_t)(butteraugli_rdmult)) / 3.5);
-    x->rdmult = exp_rdmult;
+    av1_set_butteraugli_rdmult(cpi, x, bsize, mi_row, mi_col, &x->rdmult);
   }
 #endif
 #endif

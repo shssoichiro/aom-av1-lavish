@@ -1666,7 +1666,6 @@ int av1_encode_strategy(AV1_COMP *const cpi, size_t *const size,
        oxcf->tune_cfg.tuning <= AOM_TUNE_VMAF_NEG_MAX_GAIN) ||
        oxcf->tune_cfg.tuning >= AOM_TUNE_IMAGE_PERCEPTUAL_QUALITY_VMAF_PSY_QP ||
        oxcf->tune_cfg.tuning == AOM_TUNE_LAVISH_VMAF_RD ||
-       oxcf->tune_cfg.tuning == AOM_TUNE_EXPERIMENTAL ||
        oxcf->vmaf_quantization == 1)) {
     av1_update_vmaf_curve(cpi);
   }
