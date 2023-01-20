@@ -1418,6 +1418,7 @@ StatusOr<GopEncodeInfo> AV1RateControlQMode::GetGopEncodeInfoWithNoStats(
                                                        rc_param_.base_q_index);
     // TODO(jingning): gop_frame is needed in two pass tpl later.
     (void)gop_frame;
+
     if (rc_param_.tpl_pass_index) {
       if (gop_frame.update_type == GopFrameType::kRegularGolden ||
           gop_frame.update_type == GopFrameType::kRegularKey ||

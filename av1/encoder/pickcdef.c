@@ -62,8 +62,14 @@ static INLINE void get_cdef_filter_strengths(CDEF_PICK_METHOD pick_method,
      *sec_strength = secconv_q3[sec_idx];
       break;
 
-    case CDEF_FAST_SEARCH_LVL1: *pri_strength = priconv_lvl1[pri_idx]; break;
-    case CDEF_FAST_SEARCH_LVL2: *pri_strength = priconv_lvl2[pri_idx]; break;
+    case CDEF_FAST_SEARCH_LVL1:
+      assert(pri_idx < REDUCED_PRI_STRENGTHS_LVL1);
+      *pri_strength = priconv_lvl1[pri_idx];
+      break;
+    case CDEF_FAST_SEARCH_LVL2:
+      assert(pri_idx < REDUCED_PRI_STRENGTHS_LVL2);
+      *pri_strength = priconv_lvl2[pri_idx];
+      break;
     case CDEF_FAST_SEARCH_LVL3:
       assert(pri_idx < REDUCED_PRI_STRENGTHS_LVL2);
       assert(sec_idx < REDUCED_SEC_STRENGTHS_LVL3);
