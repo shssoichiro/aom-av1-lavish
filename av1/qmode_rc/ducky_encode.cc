@@ -263,8 +263,7 @@ void DuckyEncode::InitEncoder(aom_enc_pass pass,
       seq_params->subsampling_x, seq_params->subsampling_y,
       seq_params->use_highbitdepth, lag_in_frames, cpi->oxcf.border_in_pixels,
       cpi->common.features.byte_alignment,
-      /*num_lap_buffers=*/0, /*is_all_intra=*/0,
-      cpi->oxcf.tool_cfg.enable_global_motion);
+      /*num_lap_buffers=*/0, /*is_all_intra=*/0, cpi->image_pyramid_levels);
 
   av1_tf_info_alloc(&cpi->ppi->tf_info, cpi);
   assert(ppi->lookahead != nullptr);
@@ -323,7 +322,8 @@ std::vector<FIRSTPASS_STATS> DuckyEncode::ComputeFirstPassStats() {
       YV12_BUFFER_CONFIG sd;
       image2yuvconfig(&enc_resource->img, &sd);
       av1_lookahead_push(lookahead, &sd, ts_start, ts_end,
-                         /*use_highbitdepth=*/0, /*flags=*/0);
+                         /*use_highbitdepth=*/0, ppi->cpi->image_pyramid_levels,
+                         /*flags=*/0);
       ++enc_resource->lookahead_push_count;
       AV1_COMP_DATA cpi_data = {};
       cpi_data.cx_data = buf.data();
@@ -582,31 +582,6 @@ std::vector<TplGopStats> DuckyEncode::ComputeTplStats(
   return tpl_gop_stats_list;
 }
 
-std::vector<TplGopStats> DuckyEncode::ComputeTwoPassTplStats(
-    const std::vector<FIRSTPASS_STATS> &stats_list,
-    const GopStructList &gop_list,
-    const GopEncodeInfoList &gop_encode_info_list,
-    const GopEncodeInfoList &alt_gop_encode_info_list) {
-  std::vector<TplGopStats> first_tpl_gop_stats_list =
-      ComputeTplStats(stats_list, gop_list, gop_encode_info_list);
-  const std::vector<TplGopStats> second_tpl_gop_stats_list =
-      ComputeTplStats(stats_list, gop_list, alt_gop_encode_info_list);
-  assert(first_tpl_gop_stats_list.size() == second_tpl_gop_stats_list.size());
-
-  // Set alternate_block_stats_list in first_tpl_gop_stats_list
-  // and return first_tpl_gop_stats_list
-  for (size_t i = 0; i < first_tpl_gop_stats_list.size(); ++i) {
-    for (size_t j = 0; j < first_tpl_gop_stats_list[i].frame_stats_list.size();
-         ++j) {
-      first_tpl_gop_stats_list[i]
-          .frame_stats_list[j]
-          .alternate_block_stats_list =
-          second_tpl_gop_stats_list[i].frame_stats_list[j].block_stats_list;
-    }
-  }
-  return first_tpl_gop_stats_list;
-}
-
 // Conduct final encoding process.
 std::vector<EncodeFrameResult> DuckyEncode::EncodeVideo(
     const GopStructList &gop_list,
@@ -660,7 +635,8 @@ EncodeFrameResult DuckyEncode::EncodeFrame(
       int64_t ts_start = impl_ptr_->enc_resource.lookahead_push_count;
       int64_t ts_end = ts_start + 1;
       av1_lookahead_push(lookahead, &sd, ts_start, ts_end,
-                         /*use_highbitdepth=*/0, /*flags=*/0);
+                         /*use_highbitdepth=*/0, cpi->image_pyramid_levels,
+                         /*flags=*/0);
       ++impl_ptr_->enc_resource.lookahead_push_count;
     } else {
       break;

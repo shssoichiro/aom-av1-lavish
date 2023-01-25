@@ -190,7 +190,7 @@ void av1_setup_tpl_buffers(AV1_PRIMARY *const ppi,
             &tpl_data->tpl_rec_pool[frame], width, height,
             seq_params->subsampling_x, seq_params->subsampling_y,
             seq_params->use_highbitdepth, tpl_data->border_in_pixels,
-            byte_alignment, alloc_y_plane_only))
+            byte_alignment, 0, alloc_y_plane_only))
       aom_internal_error(&ppi->error, AOM_CODEC_MEM_ERROR,
                          "Failed to allocate frame buffer");
   }
@@ -217,8 +217,8 @@ static int rate_estimator(const tran_low_t *qcoeff, int eob, TX_SIZE tx_size) {
   int rate_cost = 1;
 
   for (int idx = 0; idx < eob; ++idx) {
-    int abs_level = abs(qcoeff[scan_order->scan[idx]]);
-    rate_cost += (int)(log(abs_level + 1.0) / log(2.0)) + 1 + (abs_level > 0);
+    unsigned int abs_level = abs(qcoeff[scan_order->scan[idx]]);
+    rate_cost += get_msb(abs_level + 1) + 1 + (abs_level > 0);
   }
 
   return (rate_cost << AV1_PROB_COST_SHIFT);

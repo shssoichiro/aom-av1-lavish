@@ -23,6 +23,7 @@
 #include <unordered_set>
 #include <vector>
 
+#include "av1/encoder/rd.h"
 #include "av1/qmode_rc/ducky_encode.h"
 #include "av1/qmode_rc/reference_manager.h"
 #include "test/mock_ratectrl_qmode.h"
@@ -314,7 +315,7 @@ static TplBlockStats CreateToyTplBlockStats(int h, int w, int r, int c,
 
 static TplFrameStats CreateToyTplFrameStatsWithDiffSizes(int min_block_size,
                                                          int max_block_size) {
-  TplFrameStats frame_stats;
+  TplFrameStats frame_stats = {};
   const int max_h = max_block_size;
   const int max_w = max_h;
   const int count = max_block_size / min_block_size;
@@ -436,8 +437,26 @@ TEST_F(RateControlQModeTest, TplBlockStatsToDepStats) {
   const int unit_count = 2;
   TplBlockStats block_stats =
       CreateToyTplBlockStats(8, 4, 0, 0, intra_cost, inter_cost);
-  TplUnitDepStats unit_stats = TplBlockStatsToDepStats(block_stats, unit_count);
+  TplUnitDepStats unit_stats = TplBlockStatsToDepStats(
+      block_stats, unit_count, /*rate_dist_present=*/false);
   double expected_intra_cost = intra_cost * 1.0 / unit_count;
+  EXPECT_NEAR(unit_stats.intra_cost, expected_intra_cost, kErrorEpsilon);
+  // When inter_cost >= intra_cost in block_stats, in unit_stats,
+  // the inter_cost will be modified so that it's upper-bounded by intra_cost.
+  EXPECT_LE(unit_stats.inter_cost, unit_stats.intra_cost);
+}
+
+TEST_F(RateControlQModeTest, TplBlockStatsToDepStatsUsingPredErr) {
+  const int intra_cost = 100;
+  const int inter_cost = 120;
+  const int unit_count = 2;
+  TplBlockStats block_stats =
+      CreateToyTplBlockStats(8, 4, 0, 0, intra_cost, inter_cost);
+  block_stats.intra_pred_err = 40;
+  block_stats.inter_pred_err = 50;
+  TplUnitDepStats unit_stats = TplBlockStatsToDepStats(
+      block_stats, unit_count, /*rate_dist_present=*/true);
+  double expected_intra_cost = block_stats.intra_pred_err * 1.0 / unit_count;
   EXPECT_NEAR(unit_stats.intra_cost, expected_intra_cost, kErrorEpsilon);
   // When inter_cost >= intra_cost in block_stats, in unit_stats,
   // the inter_cost will be modified so that it's upper-bounded by intra_cost.
@@ -455,7 +474,7 @@ TEST_F(RateControlQModeTest, TplFrameDepStatsPropagateSingleZeroMotion) {
   // ref frame with coding_idx 0
   TplFrameDepStats frame_dep_stats0 =
       CreateTplFrameDepStats(frame_stats.frame_height, frame_stats.frame_width,
-                             frame_stats.min_block_size);
+                             frame_stats.min_block_size, false);
   gop_dep_stats.frame_dep_stats_list.push_back(frame_dep_stats0);
 
   // cur frame with coding_idx 1
@@ -492,13 +511,13 @@ TEST_F(RateControlQModeTest, TplFrameDepStatsPropagateCompoundZeroMotion) {
   // ref frame with coding_idx 0
   const TplFrameDepStats frame_dep_stats0 =
       CreateTplFrameDepStats(frame_stats.frame_height, frame_stats.frame_width,
-                             frame_stats.min_block_size);
+                             frame_stats.min_block_size, false);
   gop_dep_stats.frame_dep_stats_list.push_back(frame_dep_stats0);
 
   // ref frame with coding_idx 1
   const TplFrameDepStats frame_dep_stats1 =
       CreateTplFrameDepStats(frame_stats.frame_height, frame_stats.frame_width,
-                             frame_stats.min_block_size);
+                             frame_stats.min_block_size, false);
   gop_dep_stats.frame_dep_stats_list.push_back(frame_dep_stats1);
 
   // cur frame with coding_idx 2
@@ -546,7 +565,7 @@ TEST_F(RateControlQModeTest, TplFrameDepStatsPropagateSingleWithMotion) {
   // ref frame with coding_idx 0
   gop_dep_stats.frame_dep_stats_list.push_back(
       CreateTplFrameDepStats(frame_stats.frame_height, frame_stats.frame_width,
-                             frame_stats.min_block_size));
+                             frame_stats.min_block_size, false));
 
   // cur frame with coding_idx 1
   const StatusOr<TplFrameDepStats> frame_dep_stats =
@@ -601,8 +620,8 @@ TEST_F(RateControlQModeTest, ComputeTplGopDepStats) {
 
     ref_frame_table_list.push_back(CreateToyRefFrameTable(i));
   }
-  const StatusOr<TplGopDepStats> gop_dep_stats =
-      ComputeTplGopDepStats(tpl_gop_stats, {}, ref_frame_table_list);
+  const StatusOr<TplGopDepStats> gop_dep_stats = ComputeTplGopDepStats(
+      gop_struct, tpl_gop_stats, {}, ref_frame_table_list);
   ASSERT_THAT(gop_dep_stats.status(), IsOkStatus());
 
   double expected_sum = 0;
@@ -661,8 +680,8 @@ TEST(RefFrameManagerTest, GetRefFrameCount) {
   // After the first kShowExisting, the kIntermediateArf should be moved from
   // kForward to kLast due to the cur_global_order_idx_ update
   EXPECT_EQ(ref_manager.GetRefFrameCountByType(RefUpdateType::kForward), 1);
-  EXPECT_EQ(ref_manager.GetRefFrameCountByType(RefUpdateType::kBackward), 2);
-  EXPECT_EQ(ref_manager.GetRefFrameCountByType(RefUpdateType::kLast), 1);
+  EXPECT_EQ(ref_manager.GetRefFrameCountByType(RefUpdateType::kBackward), 1);
+  EXPECT_EQ(ref_manager.GetRefFrameCountByType(RefUpdateType::kLast), 2);
 
   const int second_leaf_idx = 5;
   EXPECT_EQ(type_list[second_leaf_idx], GopFrameType::kRegularLeaf);
@@ -691,10 +710,10 @@ TEST(RefFrameManagerTest, GetRefFrameCount) {
   EXPECT_EQ(ref_manager.GetRefFrameCount(), 5);
   EXPECT_EQ(ref_manager.CurGlobalOrderIdx(), 4);
   // After the kOverlay, the kRegularArf should be moved from
-  // kForward to kBackward due to the cur_global_order_idx_ update
+  // kForward to kLast due to the cur_global_order_idx_ update
   EXPECT_EQ(ref_manager.GetRefFrameCountByType(RefUpdateType::kForward), 0);
-  EXPECT_EQ(ref_manager.GetRefFrameCountByType(RefUpdateType::kBackward), 3);
-  EXPECT_EQ(ref_manager.GetRefFrameCountByType(RefUpdateType::kLast), 2);
+  EXPECT_EQ(ref_manager.GetRefFrameCountByType(RefUpdateType::kBackward), 2);
+  EXPECT_EQ(ref_manager.GetRefFrameCountByType(RefUpdateType::kLast), 3);
 }
 
 void TestRefFrameManagerPriority(const RefFrameManager &ref_manager,
@@ -753,9 +772,9 @@ TEST(RefFrameManagerTest, GetRefFrameByPriority) {
     ref_manager.UpdateRefFrameTable(&gop_frame);
   }
 
-  EXPECT_EQ(ref_manager.GetRefFrameCountByType(RefUpdateType::kBackward), 3);
+  EXPECT_EQ(ref_manager.GetRefFrameCountByType(RefUpdateType::kBackward), 2);
   TestRefFrameManagerPriority(ref_manager, RefUpdateType::kBackward);
-  EXPECT_EQ(ref_manager.GetRefFrameCountByType(RefUpdateType::kLast), 2);
+  EXPECT_EQ(ref_manager.GetRefFrameCountByType(RefUpdateType::kLast), 3);
   TestRefFrameManagerPriority(ref_manager, RefUpdateType::kLast);
 }
 
@@ -1017,7 +1036,7 @@ TEST_F(RateControlQModeTest, TestGopIntervals) {
                  std::back_inserter(gop_interval_list),
                  [](GopStruct const &x) { return x.show_frame_count; });
   EXPECT_THAT(gop_interval_list,
-              ElementsAre(21, 9, 30, 30, 17, 13, 21, 9, 30, 12, 16, 2, 30, 10));
+              ElementsAre(21, 9, 30, 30, 17, 13, 7, 23, 30, 12, 16, 2, 30, 10));
 }
 
 // TODO(b/242892473): Add a test which passes lookahead GOPs.
@@ -1062,8 +1081,13 @@ TEST_F(RateControlQModeTest, TestGetGopEncodeInfo) {
         rc.GetGopEncodeInfo(gop_list[gop_idx], tpl_gop_list[tpl_gop_idx], {},
                             firstpass_info, ref_frame_table);
     ASSERT_THAT(gop_encode_info.status(), IsOkStatus());
+
+    const int base_offset = av1_get_deltaq_offset(
+        AOM_BITS_8, rc_param_.base_q_index, gop_list[gop_idx].base_q_ratio);
+    const int base_q_index = rc_param_.base_q_index + base_offset;
+
     for (auto &frame_param : gop_encode_info->param_list) {
-      EXPECT_LE(frame_param.q_index, rc_param_.base_q_index);
+      EXPECT_LE(frame_param.q_index, base_q_index);
     }
     ref_frame_table = gop_encode_info->final_snapshot;
     for (auto &gop_frame : ref_frame_table) {
