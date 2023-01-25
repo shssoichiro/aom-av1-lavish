@@ -406,7 +406,7 @@ static const struct av1_extracfg default_extra_cfg = {
   100,             // vmaf_rd_mult
   100,             // tpl_rd_mult
   0,               // sb_qp_sweep
-  GLOBAL_MOTION_METHOD_FEATURE_MATCH,  // global_motion_method
+  GLOBAL_MOTION_METHOD_DISFLOW,  // global_motion_method
 };
 #else
 static const struct av1_extracfg default_extra_cfg = {
@@ -579,7 +579,7 @@ static const struct av1_extracfg default_extra_cfg = {
   100,             // vmaf_rd_mult
   100,             // tpl_rd_mult
   0,               // sb_qp_sweep
-  GLOBAL_MOTION_METHOD_FEATURE_MATCH,  // global_motion_method
+  GLOBAL_MOTION_METHOD_DISFLOW,  // global_motion_method
 };
 #endif
 
