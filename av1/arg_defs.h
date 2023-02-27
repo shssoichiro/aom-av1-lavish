@@ -255,6 +255,8 @@ typedef struct av1_codec_arg_definitions {
   arg_def_t butteraugli_quant_mult;
   arg_def_t butteraugli_loop_count;
   arg_def_t butteraugli_resize_factor;
+  arg_def_t butteraugli_quant_mult_pos;
+  arg_def_t butteraugli_quant_mult_neg;
 #endif
   arg_def_t loopfilter_sharpness;
   arg_def_t enable_experimental_psy;

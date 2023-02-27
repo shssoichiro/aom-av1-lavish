@@ -70,6 +70,7 @@ static void set_mb_butteraugli_rdmult_scaling(AV1_COMP *cpi,
   const int block_w = mi_size_wide[rdo_bsize];
   const int block_h = mi_size_high[rdo_bsize];
   double log_sum = 0.0;
+  double quant_log_sum = 0.0;
   double blk_count = 0.0;
   cpi->butteraugli_info.blk_count = 0.0;
 
@@ -88,31 +89,36 @@ static void set_mb_butteraugli_rdmult_scaling(AV1_COMP *cpi,
         const int index = row * num_cols + col;
         const int y_start = row * block_h;
         const int x_start = col * block_w;
-        double var = 0.0, num_of_var = 0.0;
+        double var = 0.0, num_of_var = 0.0, var_log = 0.0;
         //printf("index: %d\n", index);
         float dbutteraugli = 0.0f;
+        float exp_butteraugli = 0.0f;
         float dmse = 0.0f;
         float px_count = 0.0f;
         float qbutteraugli = 0.0f;
 
         // Loop through each pixel in the block
         for (int mi_row = y_start; // mi_row is equal to pixel array's location to resized source
-             mi_row < (row + 1) * block_h && mi_row < height; // Loop until we hit block's max height or video's max height
+             mi_row < y_start + block_h && mi_row < height; // Loop until we hit block's max height or video's max height
              mi_row++) {
           for (int mi_col = x_start; 
-               mi_col < (col + 1) * block_w && mi_col < width;
+               mi_col < x_start + block_w && mi_col < width;
                mi_col++) {
             //printf("mi_row: %d, mi_col: %d\n", mi_row, mi_col);
             float score = diffmap[mi_row * width + mi_col];
-            dbutteraugli += powf(score, 2.0f); // Essentially, weigh larger errors higher. Larger power, heavier weight towards the highest value in block.
+            dbutteraugli += powf(score, 12.f); // Compress scoring, better metric results and more consistent rdmult
+            exp_butteraugli += score; // Add only the normal score to divide by px_count later.
             qbutteraugli += score; // give qbutteraugli the raw score
             //printf("dbutteraugli: %f\n", dbutteraugli);
             float px_diff = CONVERT_TO_SHORTPTR(source->y_buffer)[mi_row * source->y_stride + mi_col] -
                             CONVERT_TO_SHORTPTR(recon->y_buffer)[mi_row * recon->y_stride + mi_col];
             dmse += px_diff * px_diff;
             px_count += 1.0f;
+            //printf("mi_row: %d, mi_col: %d,   score: %f\n", mi_row, mi_col, score);
           }
         }
+        exp_butteraugli = exp_butteraugli / px_count; // Get average butteraugli per block for experimental tuning
+        dbutteraugli = powf(dbutteraugli, 1.f / 12.f); // Get average butteraugli per block for experimental tuning
         /*
         This function will map the average of values to a value between 0.103 and 10 
         based on k rate and score, currently 0.1 and observed qbutteraugli scores range between 0-~150*px_count.
@@ -123,14 +129,16 @@ static void set_mb_butteraugli_rdmult_scaling(AV1_COMP *cpi,
         https://www.desmos.com/calculator/e7tzvn9ag0 for a resize-factor=2 example of pixel scores equal to 1.0 each
         */
         qbutteraugli = 1.0f + tanhf(((qbutteraugli / (6 - cpi->oxcf.butteraugli_resize_factor)) - 1.0f) * 0.1f) * (10.0f - 1.0f); // Normalize qbutter here
-        for (int mi_row = y_start >> ss_y; // mi_row is equal to pixel array's location to resized source
-             mi_row < (y_start >> ss_y) + (block_h >> ss_y) && mi_row < (height + ss_y) >> ss_y; // Loop until we hit block's max height or video's max height
-             mi_row++) {
-          for (int mi_col = x_start >> ss_x; 
-               mi_col < (x_start >> ss_x) + (block_w >> ss_x) && mi_col < (width + ss_x) >> ss_x;
-               mi_col++) {
-            const int src_px_index = mi_row * source->uv_stride + mi_col;
-            const int recon_px_index = mi_row * recon->uv_stride + mi_col;
+
+        const int y_end = AOMMIN((y_start >> ss_y) + (block_h >> ss_y),
+                                (height + ss_y) >> ss_y);
+        for (int y = y_start >> ss_y; y < y_end; y++) {
+          const int x_end = AOMMIN((x_start >> ss_x) + (block_w >> ss_x),
+                                  (width + ss_x) >> ss_x);
+          for (int x = x_start >> ss_x; x < x_end; x++) {
+            //printf("(width + ss_x) >> ss_x: %d", (width + ss_x) >> ss_x);
+            const int src_px_index = y * source->uv_stride + x;
+            const int recon_px_index = y * recon->uv_stride + x;
             const float px_diff_u = (float)(CONVERT_TO_SHORTPTR(source->u_buffer)[src_px_index] -
                                             CONVERT_TO_SHORTPTR(recon->u_buffer)[recon_px_index]);
             const float px_diff_v = (float)(CONVERT_TO_SHORTPTR(source->v_buffer)[src_px_index] -
@@ -139,24 +147,26 @@ static void set_mb_butteraugli_rdmult_scaling(AV1_COMP *cpi,
             px_count += 2.0f;
           }
         }
-        if (cpi->oxcf.tune_cfg.tuning == AOM_TUNE_EXPERIMENTAL) {
-          for (int mi_row = y_start; // mi_row is equal to pixel array's location to resized source
-              mi_row < (row + 1) * block_h && mi_row < height; // Loop until we hit block's max height or video's max height
-              mi_row += block_h) {
-            for (int mi_col = x_start;
-                mi_col < (col + 1) * block_w && mi_col < width;
-                mi_col += block_w) {
-              struct buf_2d buf;
 
-              buf.buf = cpi->source->y_buffer + mi_row * cpi->source->y_stride + mi_col;
-              buf.stride = cpi->source->y_stride;
+        for (int mi_row = y_start; // mi_row is equal to pixel array's location to cpi/main video source in blocks
+            mi_row < (row + 1) * block_h && mi_row < height; // Loop until we hit block's max height or video's max height
+            mi_row++) {
+          for (int mi_col = x_start;
+              mi_col < (col + 1) * block_w && mi_col < width;
+              mi_col++) {
+            struct buf_2d buf;
+            const int row_offset_y = mi_row << 2; // Get pixel offset
+            const int col_offset_y = mi_col << 2;
+            //printf("mi_row: %d, mi_col: %d\n", mi_row, mi_col);
+            buf.buf = cpi->source->y_buffer + row_offset_y * cpi->source->y_stride + col_offset_y;
+            buf.stride = cpi->source->y_stride;
 
-              double blk_var;
-              blk_var = av1_get_perpixel_variance_facade(cpi, xd, &buf, rdo_bsize,
-                                                      AOM_PLANE_Y);
-              var += blk_var;
-              num_of_var += 1.0;
-            }
+            double blk_var;
+            blk_var = av1_get_perpixel_variance_facade(cpi, xd, &buf, BLOCK_4X4, // Use 4X4 block for variance as we stride through the block by 4 pixels
+                                                    AOM_PLANE_Y);
+            var_log += log(AOMMAX(blk_var, 1));
+            var += blk_var;
+            num_of_var += 1.0;
           }
         }
         //printf("y_start: %d\n", y_start);
@@ -173,50 +183,67 @@ static void set_mb_butteraugli_rdmult_scaling(AV1_COMP *cpi,
                                               rec_buf, recon->y_stride,
                                               &sses[index]);*/
         dmse = dmse / px_count;
-        if (cpi->oxcf.tune_cfg.tuning == AOM_TUNE_EXPERIMENTAL) {
-          var = var / num_of_var;
-          var = (var + (double)dmse) / 2.0;
-        }
-        dbutteraugli = powf(dbutteraugli, 1.0f / 2.0f);
+        //if (cpi->oxcf.tune_cfg.tuning == AOM_TUNE_EXPERIMENTAL) {
+        //var = exp(var_log / num_of_var);
+        //} else {
+        var = var / num_of_var;
+        //}
+        //qbutteraugli = (float)(dmse + var) / qbutteraugli;
+        cpi->butteraugli_info.total_dbutteraugli += qbutteraugli;
         cpi->butteraugli_info.blk_count += 1.0;
-        cpi->butteraugli_info.total_dbutteraugli += qbutteraugli; // Add butteraugli block average to total
-        //printf("dbutteraugli: %f\n", dbutteraugli);
+        //printf("qbutteraugli: %f\n", qbutteraugli);
         //printf("pxcount: %f\n", px_count);
         const float eps = 0.01f;
         //printf("sses: %f\n", (float)sses[index])
         /*const float mse =
           (float)sses[index] / (float)(px_count * 2);*/
         //printf("mse: %f", mse);
-        //printf("dbutteraugli: %f\n", dbutteraugli);
+        //printf("dbutteraugli: %f   y_start: %d   x_start:   %d\n", dbutteraugli, y_start, x_start);
         double weight;
-        if (dbutteraugli < eps || (cpi->oxcf.tune_cfg.tuning != AOM_TUNE_EXPERIMENTAL && dmse < eps) || (cpi->oxcf.tune_cfg.tuning == AOM_TUNE_EXPERIMENTAL && (float)var < eps)) {
+        double quant_block_weight;
+        if (dbutteraugli < eps || dmse < eps) { // Don't use mse for getting null block weight, slightly better efficiency?
           weight = -1.0;
+          quant_block_weight = -1.0;
         } else {
           blk_count += 1.0;
           //weight = powf(dmse / dbutteraugli, 1.0f / 12.0f);
           //weight = powf(dmse / dbutteraugli, 1.0f / px_count);
           //weight = log(powf(dbutteraugli, 2.0f));
           //weight = 5*(1 - exp(-0.00625*dbutteraugli))+1.0;
-          if (cpi->oxcf.enable_experimental_psy == 1) {
-            weight = (double)(powf(dbutteraugli, 1.0f / 2.0f) - (1.0f - powf(dbutteraugli, 2.0f)) + 1.0f);
-            weight = pow(weight, 1.0 / 4.0);
-            //weight = AOMMIN(weight, 5.0);
-            //printf("dbutteraugli: %f   weight: %f\n", dbutteraugli, weight);
+          if (cpi->oxcf.tune_cfg.tuning == AOM_TUNE_EXPERIMENTAL) {
+            //double hq_level = 96;
+            //int cq_level = *xd->qindex;
+            /*double delta =
+              cq_level < hq_level
+                  ? 0.25 * (double)(hq_level - cq_level) / hq_level
+                  : 3.333 * (double)(cq_level - hq_level) / (MAXQ - hq_level);*/
+            weight = (double)exp_butteraugli; // variance over average butteraugli score for block
+            //weight = 39.126 * (1 - exp(-0.0009413 * weight)) + 1.236 + delta; // IPQ-like curve
+            weight = 13.4 * (1.0 - exp(-0.03 * weight)) + 1.6;
+            //weight = AOMMIN(weight, 15.0); // Remove or increase, possibly?
+            //weight = AOMMIN(weight, 10.0);
+            //weight += 0.8; // Balances things out a bit towards 1.0 in later geom_mean_of_scale variable(?)
           } else {
-            if (cpi->oxcf.tune_cfg.tuning == AOM_TUNE_EXPERIMENTAL) {
-              weight = powf((float)var / dbutteraugli, 1.0f / 4.0f);
-            } else {
-              weight = powf(dmse / dbutteraugli, 1.0f / 4.0f);
-            }
-            //printf("dmse: %f   dbutteraugli: %f   weight: %f\n", dmse, dbutteraugli, weight);
-            //weight = AOMMIN(weight, 5.0);
+            weight = dmse / (double)dbutteraugli; // dbutter / dbutter + variance, calm the curve using power function
+            //weight = 8.4 * (1.0 - exp(-0.00021489 * weight)) + 1.6; // VMAF-like curve, fitted to 1.6-10.0
+            //weight = 67.035434 * (1 - exp(-0.021489 * weight)) + 17.492222; // SSIM-like curve
+            //weight += 10.0;
+            weight = AOMMIN(weight, 5.0);
+            weight += 0.3; // Balances things out a bit towards 1.0 in later geom_mean_of_scale variable(?)
           }
+          //printf("var: %f   dbutteraugli: %f   weight: %f\n", var, dbutteraugli, weight);
+          //weight = AOMMIN(weight, 5.0);
           /*if (cpi->oxcf.enable_experimental_psy == 0) {
             weight += K;
           }*/
+          quant_block_weight = pow((var + qbutteraugli) / qbutteraugli, 0.25);
+          //quant_block_weight = (double)dbutteraugli / ((dmse + var) + (double)dbutteraugli);
+          //printf("dmse: %f,   var: %f,  dbutteraugli: %f   weight: %f\n", dmse, var, dbutteraugli, weight);
           log_sum += log(weight);
+          quant_log_sum += log(quant_block_weight);
         }
         cpi->butteraugli_info.rdmult_scaling_factors[index] = weight;
+        cpi->butteraugli_info.quant_scaling_factors[index] = quant_block_weight;
       }
     //printf("row: %d\n", row);
     }
@@ -243,10 +270,10 @@ static void set_mb_butteraugli_rdmult_scaling(AV1_COMP *cpi,
         }
         const int y_end = AOMMIN((y_start >> ss_y) + (block_h >> ss_y),
                                 (height + ss_y) >> ss_y);
-        for (int y = y_start >> ss_y; y < y_end; y += 2) {
+        for (int y = y_start >> ss_y; y < y_end; y++) {
           const int x_end = AOMMIN((x_start >> ss_x) + (block_w >> ss_x),
                                   (width + ss_x) >> ss_x);
-          for (int x = x_start >> ss_x; x < x_end; x += 2) {
+          for (int x = x_start >> ss_x; x < x_end; x++) {
             const int src_px_index = y * source->uv_stride + x;
             const int recon_px_index = y * recon->uv_stride + x;
             const float px_diff_u = (float)(source->u_buffer[src_px_index] -
@@ -277,19 +304,74 @@ static void set_mb_butteraugli_rdmult_scaling(AV1_COMP *cpi,
   }
   // Geometric average of the weights.
   log_sum = exp(log_sum / blk_count);
+  quant_log_sum = exp(quant_log_sum / blk_count);
   //printf("log_sum: %f\n", log_sum);
   for (int row = 0; row < num_rows; ++row) {
     for (int col = 0; col < num_cols; ++col) {
       const int index = row * num_cols + col;
       double *weight = &cpi->butteraugli_info.rdmult_scaling_factors[index];
+      //double *quant_weight = &cpi->butteraugli_info.quant_scaling_factors[index];
       if (*weight <= 0.0) {
         *weight = 1.0;
       } else {
         *weight /= log_sum;
       }
+      /*if (*quant_weight <= 0.0) {
+        *quant_weight = 1.0;
+      } else {
+        *quant_weight /= quant_log_sum;
+      }*/
       *weight = AOMMIN(*weight, 2.5);
       *weight = AOMMAX(*weight, 0.4);
       //printf("weight: %f\n", *weight);
+    }
+  }
+  if (cpi->oxcf.butteraugli_quant_mult > 0 || cpi->oxcf.butteraugli_quant_mult_pos >= 0 || cpi->oxcf.butteraugli_quant_mult_neg >= 0) {
+    const int sb_size = cpi->common.seq_params->sb_size;
+    const int num_mi_w_sb = mi_size_wide[sb_size];
+    const int num_mi_h_sb = mi_size_high[sb_size];
+    const int num_cols_sb =
+        (mi_params->mi_cols + num_mi_w_sb - 1) / num_mi_w_sb;
+    const int num_rows_sb =
+        (mi_params->mi_rows + num_mi_h_sb - 1) / num_mi_h_sb;
+    const int num_blk_w = num_mi_w_sb / num_mi_w;
+    const int num_blk_h = num_mi_h_sb / num_mi_h;
+    assert(num_blk_w * num_mi_w == num_mi_w_sb);
+    assert(num_blk_h * num_mi_h == num_mi_h_sb);
+
+    for (int row = 0; row < num_rows_sb; ++row) {
+      for (int col = 0; col < num_cols_sb; ++col) {
+        double log_sum_sb = 0.0;
+        double num_blk_count = 0.0;
+        for (int blk_row = row * num_blk_h;
+             blk_row < (row + 1) * num_blk_h && blk_row < num_rows; ++blk_row) {
+          for (int blk_col = col * num_blk_w;
+               blk_col < (col + 1) * num_blk_w && blk_col < num_cols;
+               ++blk_col) {
+            const int index = blk_row * num_cols + blk_col;
+            double *weight = &cpi->butteraugli_info.quant_scaling_factors[index];
+            if (*weight > 0.0) {
+              log_sum_sb += log(*weight);
+              num_blk_count += 1.0;
+            }
+          }
+        }
+        log_sum_sb = exp(log_sum_sb / num_blk_count);
+        for (int blk_row = row * num_blk_h;
+             blk_row < (row + 1) * num_blk_h && blk_row < num_rows; ++blk_row) {
+          for (int blk_col = col * num_blk_w;
+               blk_col < (col + 1) * num_blk_w && blk_col < num_cols;
+               ++blk_col) {
+            const int index = blk_row * num_cols + blk_col;
+            double *weight = &cpi->butteraugli_info.quant_scaling_factors[index];
+            if (*weight <= 0.0) {
+              *weight = 1.0;
+            } else {
+              *weight /= log_sum_sb;
+            }
+          }
+        }
+      }
     }
   }
   aom_free(diffmap);
@@ -314,6 +396,7 @@ void av1_set_butteraugli_rdmult(const AV1_COMP *cpi, MACROBLOCK *x,
   const int num_brows = (mi_size_high[bsize] + num_mi_h - 1) / num_mi_h;
   double num_of_mi = 0.0;
   double geom_mean_of_scale = 0.0;
+  double quant_geom_mean_of_scale = 0.0;
 
   for (int row = mi_row / num_mi_w;
        row < num_rows && row < mi_row / num_mi_w + num_brows; ++row) {
@@ -322,10 +405,34 @@ void av1_set_butteraugli_rdmult(const AV1_COMP *cpi, MACROBLOCK *x,
       const int index = row * num_cols + col;
       geom_mean_of_scale +=
           log(cpi->butteraugli_info.rdmult_scaling_factors[index]);
+      quant_geom_mean_of_scale +=
+          log(cpi->butteraugli_info.quant_scaling_factors[index]);
       num_of_mi += 1.0;
     }
   }
+  if (cpi->oxcf.butteraugli_quant_mult > 0 || cpi->oxcf.butteraugli_quant_mult_pos >= 0 || cpi->oxcf.butteraugli_quant_mult_neg >= 0) { // If butter quant is enabled in any form
+    double quant_multiplier = 1.0; // Setup multiplier variable
+    double generic_scale = exp(quant_geom_mean_of_scale / num_of_mi); // Get generic scale without multiplier for if/then usage, 0 = 1.0 scale
+    if ((cpi->oxcf.butteraugli_quant_mult_pos >= 0) && (generic_scale < 1.0)) { // If pos quant is enabled and qindex scale > 1
+      quant_multiplier = exp((quant_geom_mean_of_scale * cpi->oxcf.butteraugli_quant_mult_pos / 100.0) / num_of_mi);
+      //printf("quant_mult_pos: %f\n", quant_multiplier);
+    } else if ((cpi->oxcf.butteraugli_quant_mult_neg >= 0) && (generic_scale > 1.0)) { // If neg quant is enabled and qindex scale < 1
+      quant_multiplier = exp((quant_geom_mean_of_scale * cpi->oxcf.butteraugli_quant_mult_neg / 100.0) / num_of_mi);
+      //printf("quant_mult_neg: %f\n", quant_multiplier);
+    } else { // If scale = 1.0 or neg/pos quant isn't defined
+      quant_multiplier = exp((quant_geom_mean_of_scale * cpi->oxcf.butteraugli_quant_mult / 100.0) / num_of_mi);
+    }
+    //quant_multiplier = (1.0 - quant_multiplier) + (fast_tanhf((float)quant_multiplier - 1.0f) * 0.5) + 1.0; // Invert quant_multiplier across 1 (instead of 0), and smoothen the curve by a factor of 0.5 around 1.0
+    int new_qindex = av1_get_deltaq_offset(cm->seq_params->bit_depth, x->qindex, quant_multiplier);
+    //printf("new_qindex adjust: %d\n", new_qindex);
+    //printf("quant_multiplier: %f\n", quant_multiplier);
+    //printf("x->qindex: %d   multiplier: %f   adjustment: %d\n", x->qindex, quant_multiplier, new_qindex);
+    x->qindex = x->qindex + new_qindex; // Finally, update quantizer
+    new_qindex = AOMMIN(x->qindex, MAXQ); // Limit quantizer to video bounds
+    new_qindex = AOMMAX(x->qindex, MINQ);
+  }
   geom_mean_of_scale = exp((geom_mean_of_scale * cpi->oxcf.butteraugli_rd_mult / 100.0) / num_of_mi);
+  //printf("geom_mean_of_scale: %f\n", geom_mean_of_scale);
   *rdmult = (int)((double)(*rdmult) * geom_mean_of_scale + 0.5);
   *rdmult = AOMMAX(*rdmult, 0);
   av1_set_error_per_bit(&x->errorperbit, *rdmult);

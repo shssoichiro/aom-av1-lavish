@@ -1505,6 +1505,10 @@ AV1_COMP *av1_create_compressor(AV1_PRIMARY *ppi, const AV1EncoderConfig *oxcf,
         cm, cpi->butteraugli_info.rdmult_scaling_factors,
         aom_malloc(num_rows * num_cols *
                    sizeof(*cpi->butteraugli_info.rdmult_scaling_factors)));
+    CHECK_MEM_ERROR(
+        cm, cpi->butteraugli_info.quant_scaling_factors,
+        aom_malloc(num_rows * num_cols *
+                   sizeof(*cpi->butteraugli_info.quant_scaling_factors)));
     memset(&cpi->butteraugli_info.source, 0,
            sizeof(cpi->butteraugli_info.source));
     memset(&cpi->butteraugli_info.resized_source, 0,

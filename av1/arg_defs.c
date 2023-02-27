@@ -721,7 +721,7 @@ const av1_codec_arg_definitions_t g_av1_codec_arg_defs = {
                                   "(Meant for hyper-tuning, only active with ipq and ssim tunes, defaults to 100)"),
   .luma_bias = ARG_DEF(NULL, "luma-bias", 1,
                        "Apply a bias to low luma blocks "
-                                  "(Recommended to leave default (-5..(1)..5)"),
+                                  "(Recommended to leave default (-15..(1)..15)"),
   .chroma_q_offset_u = ARG_DEF(NULL, "chroma-q-offset-u", 1,
                        "Adjust the automatic chroma Q offset for the u plane"),
   .chroma_q_offset_v = ARG_DEF(NULL, "chroma-q-offset-v", 1,
@@ -751,6 +751,12 @@ const av1_codec_arg_definitions_t g_av1_codec_arg_defs = {
   .butteraugli_resize_factor = ARG_DEF(NULL, "butteraugli-resize-factor", 1,
                        "Change internal resizing for faster calculations with Butteraugli tunes\n "
                        "                                        0 - Do not resize, 1 - Resize to half res (Default), 2 - Resize to quarter res."),
+  .butteraugli_quant_mult_pos = ARG_DEF(NULL, "butteraugli-quant-pos", 1,
+                       "Multiplier for positive block-based butteraugli quantization (NOT RECOMMENDED) "
+                                  "(Advanced control, defaults to -1 (Disabled))"),
+  .butteraugli_quant_mult_neg = ARG_DEF(NULL, "butteraugli-quant-neg", 1,
+                       "Multiplier for negative block-based butteraugli quantization (NOT RECOMMENDED) "
+                                  "(Advanced control, defaults to -1 (Disabled))"),
 #endif
   .loopfilter_sharpness = ARG_DEF(NULL, "loopfilter-sharpness", 1,
                        "Adjust sharpness for the loopfilter, can reduce detail blur at the expense of artifacts. ((0)..7)"),
@@ -773,7 +779,7 @@ const av1_codec_arg_definitions_t g_av1_codec_arg_defs = {
               "given lambda to minimize the rdcost."),
   .global_motion_method = ARG_DEF_ENUM(NULL, "global-motion-method", 1,
                                        "Global motion search method "
-                                       "(default: feature-match)",
+                                       "(default: disflow)",
                                        global_motion_method_enum),
 #endif  // CONFIG_AV1_ENCODER
 };

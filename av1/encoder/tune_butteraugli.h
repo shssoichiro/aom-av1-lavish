@@ -25,6 +25,7 @@ typedef struct {
   YV12_BUFFER_CONFIG source, resized_source;
   bool recon_set;
   float total_dbutteraugli;
+  double *quant_scaling_factors;
   // Stores the origial qindex before scaling.
   int original_qindex;
   float distance;

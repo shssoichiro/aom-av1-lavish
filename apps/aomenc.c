@@ -259,6 +259,8 @@ static const int av1_arg_ctrl_map[] = { AOME_SET_CPUUSED,
                                         AOME_SET_BUTTERAUGLI_QUANT_MULT,
                                         AOME_SET_BUTTERAUGLI_LOOP_COUNT,
                                         AOME_SET_BUTTERAUGLI_RESIZE_FACTOR,
+                                        AOME_SET_BUTTERAUGLI_QUANT_MULT_POS,
+                                        AOME_SET_BUTTERAUGLI_QUANT_MULT_NEG,
 #endif
                                         AOME_SET_LOOPFILTER_SHARPNESS,
                                         AOME_SET_ENABLE_EXPERIMENTAL_PSY,
@@ -493,6 +495,8 @@ const arg_def_t *av1_ctrl_args[] = {
   &g_av1_codec_arg_defs.butteraugli_quant_mult,
   &g_av1_codec_arg_defs.butteraugli_loop_count,
   &g_av1_codec_arg_defs.butteraugli_resize_factor,
+  &g_av1_codec_arg_defs.butteraugli_quant_mult_pos,
+  &g_av1_codec_arg_defs.butteraugli_quant_mult_neg,
 #endif
   &g_av1_codec_arg_defs.loopfilter_sharpness,
   &g_av1_codec_arg_defs.enable_experimental_psy,

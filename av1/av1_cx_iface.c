@@ -213,6 +213,8 @@ struct av1_extracfg {
   int butteraugli_quant_mult;
   int butteraugli_loop_count;
   int butteraugli_resize_factor;
+  int butteraugli_quant_mult_pos;
+  int butteraugli_quant_mult_neg;
   int loopfilter_sharpness;
   int enable_experimental_psy;
   int vmaf_resize_factor;
@@ -400,6 +402,8 @@ static const struct av1_extracfg default_extra_cfg = {
   0,               // butteraugli_quant_mult
   0,               // butteraugli_loop_count
   1,               // butteraugli_resize_factor
+  -1,              // butteraugli_quant_mult_pos
+  -1,              // butteraugli_quant_mult_neg
   0,               // loopfilter_sharpness
   0,               // enable_experimental_psy
   1,               // vmaf_resize_factor
@@ -573,6 +577,8 @@ static const struct av1_extracfg default_extra_cfg = {
   0,               // butteraugli_quant_mult
   0,               // butteraugli_loop_count
   1,               // butteraugli_resize_factor
+  -1,              // butteraugli_quant_mult_pos
+  -1,              // butteraugli_quant_mult_neg
   0,               // loopfilter_sharpness
   0,               // enable_experimental_psy
   1,               // vmaf_resize_factor
@@ -967,7 +973,7 @@ static aom_codec_err_t validate_config(aom_codec_alg_priv_t *ctx,
   RANGE_CHECK(extra_cfg, delta_qindex_mult_neg, -1, 1000);
   RANGE_CHECK(extra_cfg, vmaf_motion_mult, 1, 1000);
   RANGE_CHECK(extra_cfg, ssim_rd_mult, 1, 1000);
-  RANGE_CHECK(extra_cfg, luma_bias, -5, 5);
+  RANGE_CHECK(extra_cfg, luma_bias, -15, 15);
   RANGE_CHECK(extra_cfg, chroma_q_offset_u, -63, 63);
   RANGE_CHECK(extra_cfg, chroma_q_offset_v, -63, 63);
 #if CONFIG_TUNE_VMAF
@@ -980,6 +986,8 @@ static aom_codec_err_t validate_config(aom_codec_alg_priv_t *ctx,
   RANGE_CHECK(extra_cfg, butteraugli_quant_mult, 0, 1000);
   RANGE_CHECK(extra_cfg, butteraugli_loop_count, 0, 10);
   RANGE_CHECK(extra_cfg, butteraugli_resize_factor, 0, 2);
+  RANGE_CHECK(extra_cfg, butteraugli_quant_mult_pos, -1, 1000);
+  RANGE_CHECK(extra_cfg, butteraugli_quant_mult_neg, -1, 1000);
 #endif
 #if CONFIG_TUNE_VMAF
   RANGE_CHECK(extra_cfg, vmaf_resize_factor, 0, 3);
@@ -1608,6 +1616,10 @@ static aom_codec_err_t set_encoder_config(AV1EncoderConfig *oxcf,
   oxcf->butteraugli_loop_count = extra_cfg->butteraugli_loop_count;
 
   oxcf->butteraugli_resize_factor = extra_cfg->butteraugli_resize_factor;
+
+  oxcf->butteraugli_quant_mult_pos = extra_cfg->butteraugli_quant_mult_pos;
+
+  oxcf->butteraugli_quant_mult_neg = extra_cfg->butteraugli_quant_mult_neg;
 #endif
 
   oxcf->loopfilter_sharpness = extra_cfg->loopfilter_sharpness;
@@ -4262,6 +4274,12 @@ static aom_codec_err_t encoder_set_option(aom_codec_alg_priv_t *ctx,
   } else if (arg_match_helper(&arg, &g_av1_codec_arg_defs.butteraugli_resize_factor,
                               argv, err_string)) {
     extra_cfg.butteraugli_resize_factor = arg_parse_int_helper(&arg, err_string);
+  } else if (arg_match_helper(&arg, &g_av1_codec_arg_defs.butteraugli_quant_mult_pos,
+                              argv, err_string)) {
+    extra_cfg.butteraugli_quant_mult_pos = arg_parse_int_helper(&arg, err_string);
+  } else if (arg_match_helper(&arg, &g_av1_codec_arg_defs.butteraugli_quant_mult_neg,
+                              argv, err_string)) {
+    extra_cfg.butteraugli_quant_mult_neg = arg_parse_int_helper(&arg, err_string);
 #endif
   } else if (arg_match_helper(&arg, &g_av1_codec_arg_defs.loopfilter_sharpness,
                               argv, err_string)) {
@@ -4444,6 +4462,20 @@ static aom_codec_err_t ctrl_set_butteraugli_resize_factor(aom_codec_alg_priv_t *
                                           va_list args) {
   struct av1_extracfg extra_cfg = ctx->extra_cfg;
   extra_cfg.butteraugli_resize_factor = CAST(AOME_SET_BUTTERAUGLI_RESIZE_FACTOR, args);
+  return update_extra_cfg(ctx, &extra_cfg);
+}
+
+static aom_codec_err_t ctrl_set_butteraugli_quant_mult_pos(aom_codec_alg_priv_t *ctx,
+                                          va_list args) {
+  struct av1_extracfg extra_cfg = ctx->extra_cfg;
+  extra_cfg.butteraugli_quant_mult_pos = CAST(AOME_SET_BUTTERAUGLI_QUANT_MULT_POS, args);
+  return update_extra_cfg(ctx, &extra_cfg);
+}
+
+static aom_codec_err_t ctrl_set_butteraugli_quant_mult_neg(aom_codec_alg_priv_t *ctx,
+                                          va_list args) {
+  struct av1_extracfg extra_cfg = ctx->extra_cfg;
+  extra_cfg.butteraugli_quant_mult_neg = CAST(AOME_SET_BUTTERAUGLI_QUANT_MULT_NEG, args);
   return update_extra_cfg(ctx, &extra_cfg);
 }
 
@@ -4648,6 +4680,8 @@ static aom_codec_ctrl_fn_map_t encoder_ctrl_maps[] = {
   { AOME_SET_BUTTERAUGLI_QUANT_MULT, ctrl_set_butteraugli_quant_mult },
   { AOME_SET_BUTTERAUGLI_LOOP_COUNT, ctrl_set_butteraugli_loop_count },
   { AOME_SET_BUTTERAUGLI_RESIZE_FACTOR, ctrl_set_butteraugli_resize_factor },
+  { AOME_SET_BUTTERAUGLI_QUANT_MULT_POS, ctrl_set_butteraugli_quant_mult_pos },
+  { AOME_SET_BUTTERAUGLI_QUANT_MULT_NEG, ctrl_set_butteraugli_quant_mult_neg },
   { AOME_SET_LOOPFILTER_SHARPNESS, ctrl_set_loopfilter_sharpness },
   { AOME_SET_ENABLE_EXPERIMENTAL_PSY, ctrl_set_enable_experimental_psy },
   { AOME_SET_VMAF_RESIZE_FACTOR, ctrl_set_vmaf_resize_factor },

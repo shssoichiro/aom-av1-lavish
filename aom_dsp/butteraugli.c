@@ -30,10 +30,10 @@ int aom_calc_butteraugli(AV1_COMP *cpi, const YV12_BUFFER_CONFIG *source,
 
   const struct YuvConstants *yuv_constants;
   if (matrix_coefficients == AOM_CICP_MC_BT_709) {
-    if (color_range == AOM_CR_FULL_RANGE) return 0;
-    yuv_constants = &kYuvH709Constants;
+    yuv_constants = color_range == AOM_CR_FULL_RANGE ? &kYuvF709Constants
+                                                     : &kYuvH709Constants;
   } else if (matrix_coefficients == AOM_CICP_MC_BT_2020_NCL || matrix_coefficients == AOM_CICP_MC_BT_2020_CL) {
-    yuv_constants = color_range == AOM_CR_FULL_RANGE ? &kYuvV2020Constants : &kYuv2020Constants;
+    yuv_constants = color_range == AOM_CR_FULL_RANGE ? &kYuvV2020Constants : &kYuv2020Constants; // Implement bt.2020 full later
   } else {
     yuv_constants = color_range == AOM_CR_FULL_RANGE ? &kYuvJPEGConstants
                                                      : &kYuvI601Constants;
@@ -116,6 +116,7 @@ int aom_calc_butteraugli(AV1_COMP *cpi, const YV12_BUFFER_CONFIG *source,
   JxlPixelFormat pixel_format = { 4, JXL_TYPE_UINT8, JXL_NATIVE_ENDIAN, 0 };
   if (bit_depth == 10 || bit_depth == 12) {
     pixel_format.data_type = JXL_TYPE_UINT16;
+    pixel_format.endianness = JXL_BIG_ENDIAN;
   }
   JxlButteraugliApi *api = JxlButteraugliApiCreate(NULL);
   JxlParallelRunner runner = JxlThreadParallelRunnerCreate(NULL, 6);
@@ -130,7 +131,8 @@ int aom_calc_butteraugli(AV1_COMP *cpi, const YV12_BUFFER_CONFIG *source,
   const float *distmap = NULL;
   uint32_t row_stride;
   JxlButteraugliResultGetDistmap(result, &distmap, &row_stride);
-  cpi->butteraugli_info.distance = JxlButteraugliResultGetDistance(result, 8.0f);
+  cpi->butteraugli_info.distance = JxlButteraugliResultGetDistance(result, 3.0f);
+  //printf("distance: %f, bit_depth: %d, row_stride: %d\n", cpi->butteraugli_info.distance, bit_depth, row_stride);
   if (distmap == NULL) {
     JxlButteraugliApiDestroy(api);
     JxlButteraugliResultDestroy(result);
