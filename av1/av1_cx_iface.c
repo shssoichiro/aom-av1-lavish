@@ -57,6 +57,8 @@ struct av1_extracfg {
   aom_tune_metric tuning;
   const char *vmaf_model_path;
   const char *partition_info_path;
+  unsigned int enable_rate_guide_deltaq;
+  const char *rate_distribution_info;
   aom_dist_metric dist_metric;
   unsigned int cq_level;  // constrained quality level
   unsigned int rc_max_intra_bitrate_pct;
@@ -261,6 +263,8 @@ static const struct av1_extracfg default_extra_cfg = {
   AOM_TUNE_PSNR,  // tuning
   "/usr/local/share/model/vmaf_v0.6.1.json",  // VMAF model path
   ".",                                        // partition info path
+  0,                                          // enable rate guide deltaq
+  "./rate_map.txt",                           // rate distribution input
   AOM_DIST_METRIC_PSNR,                       // dist_metric
   10,                                         // cq_level
   0,                                          // rc_max_intra_bitrate_pct
@@ -436,6 +440,8 @@ static const struct av1_extracfg default_extra_cfg = {
   AOM_TUNE_PSNR,  // tuning
   "/usr/local/share/model/vmaf_v0.6.1.json",  // VMAF model path
   ".",                                        // partition info path
+  0,                                          // enable rate guide deltaq
+  "./rate_map.txt",                           // rate distribution input
   AOM_DIST_METRIC_PSNR,                       // dist_metric
   10,                                         // cq_level
   0,                                          // rc_max_intra_bitrate_pct
@@ -784,12 +790,13 @@ static aom_codec_err_t validate_config(aom_codec_alg_priv_t *ctx,
   RANGE_CHECK_HI(extra_cfg, enable_auto_alt_ref, 1);
   RANGE_CHECK_HI(extra_cfg, enable_auto_bwd_ref, 2);
   RANGE_CHECK(extra_cfg, cpu_used, 0,
-              (cfg->g_usage == AOM_USAGE_REALTIME) ? 10 : 9);
+              (cfg->g_usage == AOM_USAGE_REALTIME) ? 11 : 9);
   RANGE_CHECK_HI(extra_cfg, noise_sensitivity, 6);
   RANGE_CHECK(extra_cfg, superblock_size, AOM_SUPERBLOCK_SIZE_64X64,
               AOM_SUPERBLOCK_SIZE_DYNAMIC);
   RANGE_CHECK_HI(cfg, large_scale_tile, 1);
   RANGE_CHECK_HI(extra_cfg, single_tile_decoding, 1);
+  RANGE_CHECK_HI(extra_cfg, enable_rate_guide_deltaq, 1);
 
   RANGE_CHECK_HI(extra_cfg, row_mt, 1);
   RANGE_CHECK_HI(extra_cfg, fp_mt, 1);
@@ -907,7 +914,7 @@ static aom_codec_err_t validate_config(aom_codec_alg_priv_t *ctx,
 #endif
 
   RANGE_CHECK(extra_cfg, tuning, AOM_TUNE_PSNR,
-              AOM_TUNE_FAST_VMAF_PSY_QP);
+              AOM_TUNE_FAST_VMAF_PSY_QP); // In mainline AOM, this is AOM_TUNE_VMAF_SALIENCY_MAP
 
   RANGE_CHECK(extra_cfg, dist_metric, AOM_DIST_METRIC_PSNR,
               AOM_DIST_METRIC_QM_PSNR);
@@ -1579,6 +1586,9 @@ static aom_codec_err_t set_encoder_config(AV1EncoderConfig *oxcf,
   oxcf->tier_mask = extra_cfg->tier_mask;
 
   oxcf->partition_info_path = extra_cfg->partition_info_path;
+
+  oxcf->enable_rate_guide_deltaq = extra_cfg->enable_rate_guide_deltaq;
+  oxcf->rate_distribution_info = extra_cfg->rate_distribution_info;
 
   oxcf->strict_level_conformance = extra_cfg->strict_level_conformance;
 
@@ -2335,6 +2345,9 @@ static aom_codec_err_t ctrl_set_aq_mode(aom_codec_alg_priv_t *ctx,
                                         va_list args) {
   struct av1_extracfg extra_cfg = ctx->extra_cfg;
   extra_cfg.aq_mode = CAST(AV1E_SET_AQ_MODE, args);
+
+  // Skip AQ mode if using fixed QP for current frame.
+  if (ctx->ppi->cpi->rc.use_external_qp_one_pass) extra_cfg.aq_mode = 0;
   return update_extra_cfg(ctx, &extra_cfg);
 }
 
@@ -2440,6 +2453,25 @@ static aom_codec_err_t ctrl_set_partition_info_path(aom_codec_alg_priv_t *ctx,
   const aom_codec_err_t ret = allocate_and_set_string(
       str, default_extra_cfg.partition_info_path,
       &extra_cfg.partition_info_path, ctx->ppi->error.detail);
+  if (ret != AOM_CODEC_OK) return ret;
+  return update_extra_cfg(ctx, &extra_cfg);
+}
+
+static aom_codec_err_t ctrl_enable_rate_guide_deltaq(aom_codec_alg_priv_t *ctx,
+                                                     va_list args) {
+  struct av1_extracfg extra_cfg = ctx->extra_cfg;
+  extra_cfg.enable_rate_guide_deltaq =
+      CAST(AV1E_ENABLE_RATE_GUIDE_DELTAQ, args);
+  return update_extra_cfg(ctx, &extra_cfg);
+}
+
+static aom_codec_err_t ctrl_set_rate_distribution_info(
+    aom_codec_alg_priv_t *ctx, va_list args) {
+  struct av1_extracfg extra_cfg = ctx->extra_cfg;
+  const char *str = CAST(AV1E_SET_RATE_DISTRIBUTION_INFO, args);
+  const aom_codec_err_t ret = allocate_and_set_string(
+      str, default_extra_cfg.rate_distribution_info,
+      &extra_cfg.rate_distribution_info, ctx->ppi->error.detail);
   if (ret != AOM_CODEC_OK) return ret;
   return update_extra_cfg(ctx, &extra_cfg);
 }
@@ -2680,6 +2712,21 @@ static aom_codec_err_t ctrl_set_rtc_external_rc(aom_codec_alg_priv_t *ctx,
   return AOM_CODEC_OK;
 }
 
+static aom_codec_err_t ctrl_set_quantizer_one_pass(aom_codec_alg_priv_t *ctx,
+                                                   va_list args) {
+  const int qp = CAST(AV1E_SET_QUANTIZER_ONE_PASS, args);
+
+  if (qp < 0 || qp > 63) return AOM_CODEC_INVALID_PARAM;
+
+  aom_codec_enc_cfg_t *cfg = &ctx->cfg;
+  struct av1_extracfg extra_cfg = ctx->extra_cfg;
+  cfg->rc_min_quantizer = cfg->rc_max_quantizer = qp;
+  extra_cfg.aq_mode = 0;
+  ctx->ppi->cpi->rc.use_external_qp_one_pass = 1;
+
+  return update_extra_cfg(ctx, &extra_cfg);
+}
+
 #if !CONFIG_REALTIME_ONLY
 aom_codec_err_t av1_create_stats_buffer(FIRSTPASS_STATS **frame_stats_buffer,
                                         STATS_BUFFER_CTX *stats_buf_context,
@@ -2915,6 +2962,8 @@ static void destroy_extra_config(struct av1_extracfg *extra_cfg) {
                         &extra_cfg->second_pass_log);
   check_and_free_string(default_extra_cfg.partition_info_path,
                         &extra_cfg->partition_info_path);
+  check_and_free_string(default_extra_cfg.rate_distribution_info,
+                        &extra_cfg->rate_distribution_info);
   check_and_free_string(default_extra_cfg.film_grain_table_filename,
                         &extra_cfg->film_grain_table_filename);
 }
@@ -3642,6 +3691,13 @@ static aom_codec_err_t ctrl_set_svc_params(aom_codec_alg_priv_t *ctx,
     ctx->ppi->use_svc = 1;
     const int num_layers =
         ppi->number_spatial_layers * ppi->number_temporal_layers;
+    for (int layer = 0; layer < num_layers; ++layer) {
+      if (params->max_quantizers[layer] > 63 ||
+          params->min_quantizers[layer] < 0 ||
+          params->min_quantizers[layer] > params->max_quantizers[layer]) {
+        return AOM_CODEC_INVALID_PARAM;
+      }
+    }
     if (!av1_alloc_layer_context(cpi, num_layers)) return AOM_CODEC_MEM_ERROR;
 
     for (sl = 0; sl < ppi->number_spatial_layers; ++sl) {
@@ -3883,6 +3939,17 @@ static aom_codec_err_t encoder_set_option(aom_codec_alg_priv_t *ctx,
                             argv, err_string)) {
     err = allocate_and_set_string(value, default_extra_cfg.partition_info_path,
                                   &extra_cfg.partition_info_path, err_string);
+  } else if (arg_match_helper(&arg,
+                              &g_av1_codec_arg_defs.enable_rate_guide_deltaq,
+                              argv, err_string)) {
+    extra_cfg.enable_rate_guide_deltaq =
+        arg_parse_uint_helper(&arg, err_string);
+  } else if (arg_match_helper(&arg,
+                              &g_av1_codec_arg_defs.rate_distribution_info,
+                              argv, err_string)) {
+    err =
+        allocate_and_set_string(value, default_extra_cfg.rate_distribution_info,
+                                &extra_cfg.rate_distribution_info, err_string);
   } else if (arg_match_helper(&arg, &g_av1_codec_arg_defs.dist_metric, argv,
                               err_string)) {
     extra_cfg.dist_metric = arg_parse_enum_helper(&arg, err_string);
@@ -4640,6 +4707,8 @@ static aom_codec_ctrl_fn_map_t encoder_ctrl_maps[] = {
   { AV1E_SET_SINGLE_TILE_DECODING, ctrl_set_single_tile_decoding },
   { AV1E_SET_VMAF_MODEL_PATH, ctrl_set_vmaf_model_path },
   { AV1E_SET_PARTITION_INFO_PATH, ctrl_set_partition_info_path },
+  { AV1E_ENABLE_RATE_GUIDE_DELTAQ, ctrl_enable_rate_guide_deltaq },
+  { AV1E_SET_RATE_DISTRIBUTION_INFO, ctrl_set_rate_distribution_info },
   { AV1E_SET_FILM_GRAIN_TEST_VECTOR, ctrl_set_film_grain_test_vector },
   { AV1E_SET_FILM_GRAIN_TABLE, ctrl_set_film_grain_table },
   { AV1E_SET_DENOISE_NOISE_LEVEL, ctrl_set_denoise_noise_level },
@@ -4687,6 +4756,7 @@ static aom_codec_ctrl_fn_map_t encoder_ctrl_maps[] = {
   { AOME_SET_VMAF_RESIZE_FACTOR, ctrl_set_vmaf_resize_factor },
   { AOME_SET_VMAF_RD_MULT, ctrl_set_vmaf_rd_mult },
   { AOME_SET_TPL_RD_MULT, ctrl_set_tpl_rd_mult },
+  { AV1E_SET_QUANTIZER_ONE_PASS, ctrl_set_quantizer_one_pass },
 
   // Getters
   { AOME_GET_LAST_QUANTIZER, ctrl_get_quantizer },

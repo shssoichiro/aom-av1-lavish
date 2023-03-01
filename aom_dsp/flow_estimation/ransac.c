@@ -24,12 +24,11 @@
 #include "av1/encoder/random.h"
 
 #define MAX_MINPTS 4
-#define MAX_DEGENERATE_ITER 10
 #define MINPTS_MULTIPLIER 5
 
 #define INLIER_THRESHOLD 1.25
 #define INLIER_THRESHOLD_SQUARED (INLIER_THRESHOLD * INLIER_THRESHOLD)
-#define MIN_TRIALS 20
+#define NUM_TRIALS 20
 
 // Flag to enable functions for finding TRANSLATION type models.
 //
@@ -116,7 +115,6 @@ static bool find_rotzoom(int np, const double *pts1, const double *pts2,
   const int n = 4;    // Size of least-squares problem
   double mat[4 * 4];  // Accumulator for A'A
   double y[4];        // Accumulator for A'b
-  double x[4];        // Output vector
   double a[4];        // Single row of A
   double b;           // Single element of b
 
@@ -127,95 +125,96 @@ static bool find_rotzoom(int np, const double *pts1, const double *pts2,
     double sx = *(pts1++);
     double sy = *(pts1++);
 
-    a[0] = sx;
-    a[1] = sy;
-    a[2] = 1;
-    a[3] = 0;
+    a[0] = 1;
+    a[1] = 0;
+    a[2] = sx;
+    a[3] = sy;
     b = dx;
     least_squares_accumulate(mat, y, a, b, n);
 
-    a[0] = sy;
-    a[1] = -sx;
-    a[2] = 0;
-    a[3] = 1;
+    a[0] = 0;
+    a[1] = 1;
+    a[2] = sy;
+    a[3] = -sx;
     b = dy;
     least_squares_accumulate(mat, y, a, b, n);
   }
 
-  if (!least_squares_solve(mat, y, x, n)) {
+  // Fill in params[0] .. params[3] with output model
+  if (!least_squares_solve(mat, y, params, n)) {
     return false;
   }
 
-  // Rearrange least squares result to form output model
-  params[0] = x[2];
-  params[1] = x[3];
-  params[2] = x[0];
-  params[3] = x[1];
+  // Fill in remaining parameters
   params[4] = -params[3];
   params[5] = params[2];
 
   return true;
 }
 
-// TODO(rachelbarker): As the x and y equations are decoupled in find_affine(),
-// the least-squares problem can be split this into two 3-dimensional problems,
-// which should be faster to solve.
 static bool find_affine(int np, const double *pts1, const double *pts2,
                         double *params) {
-  const int n = 6;    // Size of least-squares problem
-  double mat[6 * 6];  // Accumulator for A'A
-  double y[6];        // Accumulator for A'b
-  double x[6];        // Output vector
-  double a[6];        // Single row of A
-  double b;           // Single element of b
+  // Note: The least squares problem for affine models is 6-dimensional,
+  // but it splits into two independent 3-dimensional subproblems.
+  // Solving these two subproblems separately and recombining at the end
+  // results in less total computation than solving the 6-dimensional
+  // problem directly.
+  //
+  // The two subproblems correspond to all the parameters which contribute
+  // to the x output of the model, and all the parameters which contribute
+  // to the y output, respectively.
 
-  least_squares_init(mat, y, n);
+  const int n = 3;       // Size of each least-squares problem
+  double mat[2][3 * 3];  // Accumulator for A'A
+  double y[2][3];        // Accumulator for A'b
+  double x[2][3];        // Output vector
+  double a[2][3];        // Single row of A
+  double b[2];           // Single element of b
+
+  least_squares_init(mat[0], y[0], n);
+  least_squares_init(mat[1], y[1], n);
   for (int i = 0; i < np; ++i) {
     double dx = *(pts2++);
     double dy = *(pts2++);
     double sx = *(pts1++);
     double sy = *(pts1++);
 
-    a[0] = sx;
-    a[1] = sy;
-    a[2] = 0;
-    a[3] = 0;
-    a[4] = 1;
-    a[5] = 0;
-    b = dx;
-    least_squares_accumulate(mat, y, a, b, n);
+    a[0][0] = 1;
+    a[0][1] = sx;
+    a[0][2] = sy;
+    b[0] = dx;
+    least_squares_accumulate(mat[0], y[0], a[0], b[0], n);
 
-    a[0] = 0;
-    a[1] = 0;
-    a[2] = sx;
-    a[3] = sy;
-    a[4] = 0;
-    a[5] = 1;
-    b = dy;
-    least_squares_accumulate(mat, y, a, b, n);
+    a[1][0] = 1;
+    a[1][1] = sx;
+    a[1][2] = sy;
+    b[1] = dy;
+    least_squares_accumulate(mat[1], y[1], a[1], b[1], n);
   }
 
-  if (!least_squares_solve(mat, y, x, n)) {
+  if (!least_squares_solve(mat[0], y[0], x[0], n)) {
+    return false;
+  }
+  if (!least_squares_solve(mat[1], y[1], x[1], n)) {
     return false;
   }
 
   // Rearrange least squares result to form output model
-  params[0] = mat[4];
-  params[1] = mat[5];
-  params[2] = mat[0];
-  params[3] = mat[1];
-  params[4] = mat[2];
-  params[5] = mat[3];
+  params[0] = x[0][0];
+  params[1] = x[1][0];
+  params[2] = x[0][1];
+  params[3] = x[0][2];
+  params[4] = x[1][1];
+  params[5] = x[1][2];
 
   return true;
 }
 
-// Returns true on success, false if not enough points provided
-static bool get_rand_indices(int npoints, int minpts, int *indices,
+static void get_rand_indices(int npoints, int minpts, int *indices,
                              unsigned int *seed) {
   int i, j;
   int ptr = lcg_rand16(seed) % npoints;
-  if (minpts > npoints) return false;
+  assert(minpts < npoints);
   indices[0] = ptr;
   ptr = (ptr == npoints - 1 ? 0 : ptr + 1);
   i = 1;
@@ -230,7 +229,6 @@ static bool get_rand_indices(int npoints, int minpts, int *indices,
     }
     indices[i++] = ptr;
   }
-  return true;
 }
 
 typedef struct {
@@ -278,7 +276,6 @@ static void clear_motion(RANSAC_MOTION *motion, int num_points) {
 static bool ransac_internal(const Correspondence *matched_points, int npoints,
                             MotionModel *motion_models, int num_desired_motions,
                             const RansacModelInfo *model_info) {
-  int trial_count = 0;
   int i = 0;
   int minpts = model_info->minpts;
   bool ret_val = true;
@@ -340,38 +337,25 @@ static bool ransac_internal(const Correspondence *matched_points, int npoints,
     corners2[2 * i + 1] = matched_points[i].ry;
   }
 
-  while (MIN_TRIALS > trial_count) {
-    clear_motion(&current_motion, npoints);
+  for (int trial_count = 0; trial_count < NUM_TRIALS; trial_count++) {
+    get_rand_indices(npoints, minpts, indices, &seed);
 
-    int degenerate = 1;
-    int num_degenerate_iter = 0;
+    copy_points_at_indices(points1, corners1, indices, minpts);
+    copy_points_at_indices(points2, corners2, indices, minpts);
 
-    while (degenerate) {
-      num_degenerate_iter++;
-      if (!get_rand_indices(npoints, minpts, indices, &seed)) {
-        ret_val = false;
-        goto finish_ransac;
-      }
-
-      copy_points_at_indices(points1, corners1, indices, minpts);
-      copy_points_at_indices(points2, corners2, indices, minpts);
-
-      degenerate = model_info->is_degenerate(points1);
-      if (num_degenerate_iter > MAX_DEGENERATE_ITER) {
-        ret_val = false;
-        goto finish_ransac;
-      }
+    if (model_info->is_degenerate(points1)) {
+      continue;
     }
 
     if (!model_info->find_transformation(minpts, points1, points2,
                                          params_this_motion)) {
-      trial_count++;
       continue;
     }
 
     model_info->project_points(params_this_motion, corners1, image1_coord,
                                npoints, 2, 2);
 
+    current_motion.num_inliers = 0;
     double sse = 0.0;
     for (i = 0; i < npoints; ++i) {
       double dx = image1_coord[i * 2] - corners2[i * 2];
@@ -384,27 +368,28 @@ static bool ransac_internal(const Correspondence *matched_points, int npoints,
       }
     }
 
-    if (current_motion.num_inliers >= worst_kept_motion->num_inliers &&
-        current_motion.num_inliers > 1) {
-      current_motion.sse = sse;
-      if (is_better_motion(&current_motion, worst_kept_motion)) {
-        // This motion is better than the worst currently kept motion. Remember
-        // the inlier points and sse. The parameters for each kept motion
-        // will be recomputed later using only the inliers.
-        worst_kept_motion->num_inliers = current_motion.num_inliers;
-        worst_kept_motion->sse = current_motion.sse;
-        memcpy(worst_kept_motion->inlier_indices, current_motion.inlier_indices,
-               sizeof(*current_motion.inlier_indices) * npoints);
-        assert(npoints > 0);
-        // Determine the new worst kept motion and its num_inliers and sse.
-        for (i = 0; i < num_desired_motions; ++i) {
-          if (is_better_motion(worst_kept_motion, &motions[i])) {
-            worst_kept_motion = &motions[i];
-          }
+    if (current_motion.num_inliers < MIN_INLIER_PROB * npoints) {
+      // Reject models with too few inliers
+      continue;
+    }
+
+    current_motion.sse = sse;
+    if (is_better_motion(&current_motion, worst_kept_motion)) {
+      // This motion is better than the worst currently kept motion. Remember
+      // the inlier points and sse. The parameters for each kept motion
+      // will be recomputed later using only the inliers.
+      worst_kept_motion->num_inliers = current_motion.num_inliers;
+      worst_kept_motion->sse = current_motion.sse;
+      memcpy(worst_kept_motion->inlier_indices, current_motion.inlier_indices,
+             sizeof(*current_motion.inlier_indices) * npoints);
+      assert(npoints > 0);
+      // Determine the new worst kept motion and its num_inliers and sse.
+      for (i = 0; i < num_desired_motions; ++i) {
+        if (is_better_motion(worst_kept_motion, &motions[i])) {
+          worst_kept_motion = &motions[i];
         }
       }
     }
-    trial_count++;
   }
 
   // Sort the motions, best first.
@@ -412,8 +397,10 @@ static bool ransac_internal(const Correspondence *matched_points, int npoints,
 
   // Recompute the motions using only the inliers.
   for (i = 0; i < num_desired_motions; ++i) {
-    if (motions[i].num_inliers >= minpts) {
-      int num_inliers = motions[i].num_inliers;
+    int num_inliers = motions[i].num_inliers;
+    if (num_inliers > 0) {
+      assert(num_inliers >= minpts);
+
       copy_points_at_indices(points1, corners1, motions[i].inlier_indices,
                              num_inliers);
       copy_points_at_indices(points2, corners2, motions[i].inlier_indices,
@@ -430,7 +417,7 @@ static bool ransac_internal(const Correspondence *matched_points, int npoints,
         motion_models[i].inliers[2 * j + 1] = (int)rint(corr->y);
       }
     }
-    motion_models[i].num_inliers = motions[i].num_inliers;
+    motion_models[i].num_inliers = num_inliers;
   }
 
 finish_ransac:

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018, Alliance for Open Media. All rights reserved
+ * Copyright (c) 2023, Alliance for Open Media. All rights reserved
  *
  * This source code is subject to the terms of the BSD 2 Clause License and
  * the Alliance for Open Media Patent License 1.0. If the BSD 2 Clause License
@@ -9,14 +9,15 @@
  * PATENTS file, you can obtain it at www.aomedia.org/license/patent.
  */
 
-#include "config/av1_rtcd.h"
+#ifndef AOM_AV1_ENCODER_SALIENCY_MAP_H_
+#define AOM_AV1_ENCODER_SALIENCY_MAP_H_
 
-#include "av1/common/av1_txfm.h"
-#include "av1/common/x86/av1_txfm_sse4.h"
+typedef struct saliency_feature_map {
+  double *buf;  // stores values of the map in 1D array
+  int height;
+  int width;
+} saliency_feature_map;
 
-// This function assumes `arr` is 16-byte aligned.
-void av1_round_shift_array_sse4_1(int32_t *arr, int size, int bit) {
-  __m128i *const vec = (__m128i *)arr;
-  const int vec_size = size >> 2;
-  av1_round_shift_array_32_sse4_1(vec, vec, vec_size, bit);
-}
+int av1_set_saliency_map(AV1_COMP *cpi);
+
+#endif  // AOM_AV1_ENCODER_SALIENCY_MAP_H_

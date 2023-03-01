@@ -85,20 +85,14 @@ static INLINE __m128i xx_set1_64_from_32i(int32_t a) {
 #endif
 }
 
-// The naive method of interleaving two signed values a and b,
-// to give the register {a, b, a, b, a, b, a, b}, is:
-//   _mm_set1_epi32((a & 0xFFFF) | (b << 16))
-// However, this causes IntegerSanitizer to issue a warning if b is
-// negative, as do many other similar functions.
+// Fill an SSE register using an interleaved pair of values, ie. set the
+// 8 channels to {a, b, a, b, a, b, a, b}, using the same channel ordering
+// as when a register is stored to / loaded from memory.
 //
-// This function provides a simple way to do the same thing without
-// raising IntegerSanitizer warnings, by zero-extending the values
-// and then combining them as unsigned values.
+// This is useful for rearranging filter kernels for use with the _mm_madd_epi16
+// instruction
 static INLINE __m128i xx_set2_epi16(int16_t a, int16_t b) {
-  uint32_t a_32 = (uint32_t)(a & 0xFFFF);
-  uint32_t b_32 = (uint32_t)(b & 0xFFFF);
-  uint32_t v = a_32 | (b_32 << 16);
-  return _mm_set1_epi32((int32_t)v);
+  return _mm_setr_epi16(a, b, a, b, a, b, a, b);
 }
 
 static INLINE __m128i xx_round_epu16(__m128i v_val_w) {

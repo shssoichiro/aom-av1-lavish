@@ -94,11 +94,10 @@ void av1_init_obmc_buffer(OBMCBuffer *obmc_buffer) {
 
 void av1_make_default_fullpel_ms_params(
     FULLPEL_MOTION_SEARCH_PARAMS *ms_params, const struct AV1_COMP *cpi,
-    const MACROBLOCK *x, BLOCK_SIZE bsize, const MV *ref_mv,
+    MACROBLOCK *x, BLOCK_SIZE bsize, const MV *ref_mv,
     const search_site_config search_sites[NUM_DISTINCT_SEARCH_METHODS],
     int fine_search_interval) {
   const MV_SPEED_FEATURES *mv_sf = &cpi->sf.mv_sf;
-  const int sf_blk_search_method = mv_sf->use_bsize_dependent_search_method;
 
   // High level params
   ms_params->bsize = bsize;
@@ -107,14 +106,25 @@ void av1_make_default_fullpel_ms_params(
   init_ms_buffers(&ms_params->ms_buffers, x);
 
   SEARCH_METHODS search_method = mv_sf->search_method;
+  const int sf_blk_search_method = mv_sf->use_bsize_dependent_search_method;
   const int min_dim = AOMMIN(block_size_wide[bsize], block_size_high[bsize]);
-  if (sf_blk_search_method >= 2) {
-    const int qband = x->qindex >> (QINDEX_BITS - 2);
-    if (min_dim >= 16 && x->content_state_sb.source_sad_nonrd <= kMedSad &&
-        qband < 3)
-      search_method = get_faster_search_method(search_method);
-  } else if (sf_blk_search_method >= 1 && min_dim >= 32) {
+  const int qband = x->qindex >> (QINDEX_BITS - 2);
+  const bool use_faster_search_method =
+      (sf_blk_search_method == 1 && min_dim >= 32) ||
+      (sf_blk_search_method >= 2 && min_dim >= 16 &&
+       x->content_state_sb.source_sad_nonrd <= kMedSad && qband < 3);
+
+  if (use_faster_search_method) {
     search_method = get_faster_search_method(search_method);
+
+    // We might need to update the search site config since search_method
+    // is changed here.
+    const int ref_stride = ms_params->ms_buffers.ref->stride;
+    if (ref_stride != search_sites[search_method].stride) {
+      av1_refresh_search_site_config(x->search_site_cfg_buf, search_method,
+                                     ref_stride);
+      search_sites = x->search_site_cfg_buf;
+    }
   }
 
   av1_set_mv_search_method(ms_params, search_sites, search_method);
@@ -194,17 +204,23 @@ void av1_make_default_subpel_ms_params(SUBPEL_MOTION_SEARCH_PARAMS *ms_params,
 }
 
 void av1_set_mv_search_range(FullMvLimits *mv_limits, const MV *mv) {
-  int col_min =
-      GET_MV_RAWPEL(mv->col) - MAX_FULL_PEL_VAL + (mv->col & 7 ? 1 : 0);
-  int row_min =
-      GET_MV_RAWPEL(mv->row) - MAX_FULL_PEL_VAL + (mv->row & 7 ? 1 : 0);
-  int col_max = GET_MV_RAWPEL(mv->col) + MAX_FULL_PEL_VAL;
-  int row_max = GET_MV_RAWPEL(mv->row) + MAX_FULL_PEL_VAL;
+  // Calculate the outermost full-pixel MVs which are inside the limits set by
+  // av1_set_subpel_mv_search_range().
+  //
+  // The subpel limits are simply mv->col +/- 8*MAX_FULL_PEL_VAL, and similar
+  // for mv->row. We can then divide by 8 to find the fullpel MV limits. But
+  // we have to be careful about the rounding. We want these bounds to be
+  // at least as tight as the subpel limits, which means that we must round
+  // the minimum values up and the maximum values down when dividing.
+  int col_min = ((mv->col + 7) >> 3) - MAX_FULL_PEL_VAL;
+  int row_min = ((mv->row + 7) >> 3) - MAX_FULL_PEL_VAL;
+  int col_max = (mv->col >> 3) + MAX_FULL_PEL_VAL;
+  int row_max = (mv->row >> 3) + MAX_FULL_PEL_VAL;
 
-  col_min = AOMMAX(col_min, GET_MV_RAWPEL(MV_LOW) + 1);
-  row_min = AOMMAX(row_min, GET_MV_RAWPEL(MV_LOW) + 1);
-  col_max = AOMMIN(col_max, GET_MV_RAWPEL(MV_UPP) - 1);
-  row_max = AOMMIN(row_max, GET_MV_RAWPEL(MV_UPP) - 1);
+  col_min = AOMMAX(col_min, (MV_LOW >> 3) + 1);
+  row_min = AOMMAX(row_min, (MV_LOW >> 3) + 1);
+  col_max = AOMMIN(col_max, (MV_UPP >> 3) - 1);
+  row_max = AOMMIN(row_max, (MV_UPP >> 3) - 1);
 
   // Get intersection of UMV window and valid MV window to reduce # of checks
   // in diamond search.
@@ -3265,13 +3281,111 @@ static INLINE unsigned int compute_motion_cost(
 }
 
 // Refines MV in a small range
+
+// Macros to build bitmasks which help us avoid redundant computations
+//
+// To explain the idea here, imagine that on the first iteration of the
+// loop below, we step rightwards. Then, on the second iteration, the neighbors
+// to consider are:
+//     . . .
+//     0 1 .
+//     . . .
+// Where 0 is the initial search point, 1 is the best candidate found in the
+// first iteration, and the dots are the other neighbors of point 1.
+//
+// Naively, we would now need to scan all 8 neighbors of point 1 (point 0 and
+// the seven points marked with dots), and compare them to see where to move
+// next. However, we already evaluated 5 of those 8 neighbors in the last
+// iteration, and decided that they are worse than point 1. So we don't need
+// to re-consider these points. We only really need to consider the three
+// points which are adjacent to point 1 but *not* to point 0.
+//
+// As the algorithm goes on, there are other ways that redundant evaluations
+// can happen, if the search path curls back around on itself.
+//
+// To avoid all possible redundancies, we'd have to build a set containing
+// every point we have already checked, and this would be quite expensive.
+//
+// So instead, we apply a 95%-effective solution with a much lower overhead:
+// we prune out the points which were considered during the previous
+// iteration, but we don't worry about any prior iteration. This can be done
+// as follows:
+//
+// We build a static table, called neighbor_mask, which answers the question
+// "if we moved in direction X last time, which neighbors are new, and which
+//  were scanned last iteration?"
+// Then we can query this table to quickly determine which points we need to
+// evaluate, and which we can skip.
+//
+// To query the table, the logic is simply:
+// neighbor_mask[i] & (1 << j) == "if we moved in direction i last iteration,
+//                             do we need to scan neighbor j this iteration?"
+#define NEIGHBOR_MASK_DIA(left, down, right, up) \
+  (left | (down << 1) | (right << 2) | (up << 3))
+
+#define NEIGHBOR_MASK_SQR(left, down, right, up, down_left, down_right, \
+                          up_left, up_right)                            \
+  (left | (down << 1) | (right << 2) | (up << 3) | (down_left << 4) |   \
+   (down_right << 5) | (up_left << 6) | (up_right << 7))
+
+static const warp_search_config warp_search_info[WARP_SEARCH_METHODS] = {
+  // WARP_SEARCH_DIAMOND
+  {
+    .num_neighbors = 4,
+    .neighbors = { {  0, -1 }, {  1,  0 }, {  0,  1 }, { -1,  0 } },
+    .neighbor_mask = {
+      // If we stepped left last time, consider all points except right
+      NEIGHBOR_MASK_DIA(1, 1, 0, 1),
+      // If we stepped down last time, consider all points except up
+      NEIGHBOR_MASK_DIA(1, 1, 1, 0),
+      // Stepped right last time
+      NEIGHBOR_MASK_DIA(0, 1, 1, 1),
+      // Stepped up last time
+      NEIGHBOR_MASK_DIA(1, 0, 1, 1),
+    },
+  },
+  // WARP_SEARCH_SQUARE
+  {
+    .num_neighbors = 8,
+    .neighbors = { {  0, -1 }, {  1,  0 }, {  0,  1 }, { -1,  0 },
+                   {  1, -1 }, {  1,  1 }, { -1, -1 }, { -1,  1 } },
+    .neighbor_mask = {
+      // If we stepped left last time, then we only need to consider 3 points:
+      // left, down+left, up+left
+      NEIGHBOR_MASK_SQR(1, 0, 0, 0, 1, 0, 1, 0),
+      // If we stepped down last time, then we only need to consider 3 points:
+      // down, down+left, down+right
+      NEIGHBOR_MASK_SQR(0, 1, 0, 0, 1, 1, 0, 0),
+      // Stepped right last time
+      NEIGHBOR_MASK_SQR(0, 0, 1, 0, 0, 1, 0, 1),
+      // Stepped up last time
+      NEIGHBOR_MASK_SQR(0, 0, 0, 1, 0, 0, 1, 1),
+
+      // If we stepped down+left last time, then we need to consider 5 points:
+      // left, down, down+left, down+right, up+left
+      NEIGHBOR_MASK_SQR(1, 1, 0, 0, 1, 1, 1, 0),
+      // Stepped down+right last time
+      NEIGHBOR_MASK_SQR(0, 1, 1, 0, 1, 1, 0, 1),
+      // Stepped up+left last time
+      NEIGHBOR_MASK_SQR(1, 0, 0, 1, 1, 0, 1, 1),
+      // Stepped up+right last time
+      NEIGHBOR_MASK_SQR(0, 0, 1, 1, 0, 1, 1, 1),
+    },
+  },
+};
+
 unsigned int av1_refine_warped_mv(MACROBLOCKD *xd, const AV1_COMMON *const cm,
                                   const SUBPEL_MOTION_SEARCH_PARAMS *ms_params,
                                   BLOCK_SIZE bsize, const int *pts0,
-                                  const int *pts_inref0, int total_samples) {
+                                  const int *pts_inref0, int total_samples,
+                                  WARP_SEARCH_METHOD search_method,
+                                  int num_iterations) {
   MB_MODE_INFO *mbmi = xd->mi[0];
-  static const MV neighbors[8] = { { 0, -1 }, { 1, 0 }, { 0, 1 }, { -1, 0 },
-                                   { 0, -2 }, { 2, 0 }, { 0, 2 }, { -2, 0 } };
+
+  const MV *neighbors = warp_search_info[search_method].neighbors;
+  const int num_neighbors = warp_search_info[search_method].num_neighbors;
+  const uint8_t *neighbor_mask = warp_search_info[search_method].neighbor_mask;
+
   MV *best_mv = &mbmi->mv[0].as_mv;
 
   WarpedMotionParams best_wm_params = mbmi->wm_params;
@@ -3279,7 +3393,7 @@ unsigned int av1_refine_warped_mv(MACROBLOCKD *xd, const AV1_COMMON *const cm,
   unsigned int bestmse;
   const SubpelMvLimits *mv_limits = &ms_params->mv_limits;
 
-  const int start = ms_params->allow_hp ? 0 : 4;
+  const int mv_shift = ms_params->allow_hp ? 0 : 1;
 
   // Calculate the center position's error
   assert(av1_is_subpelmv_in_range(mv_limits, *best_mv));
@@ -3289,14 +3403,22 @@ unsigned int av1_refine_warped_mv(MACROBLOCKD *xd, const AV1_COMMON *const cm,
   int pts[SAMPLES_ARRAY_SIZE], pts_inref[SAMPLES_ARRAY_SIZE];
   const int mi_row = xd->mi_row;
   const int mi_col = xd->mi_col;
-  for (int ite = 0; ite < 2; ++ite) {
+
+  // First step always scans all neighbors
+  uint8_t valid_neighbors = UINT8_MAX;
+
+  for (int ite = 0; ite < num_iterations; ++ite) {
     int best_idx = -1;
 
-    for (int idx = start; idx < start + 4; ++idx) {
+    for (int idx = 0; idx < num_neighbors; ++idx) {
+      if ((valid_neighbors & (1 << idx)) == 0) {
+        continue;
+      }
+
       unsigned int thismse;
 
-      MV this_mv = { best_mv->row + neighbors[idx].row,
-                     best_mv->col + neighbors[idx].col };
+      MV this_mv = { best_mv->row + neighbors[idx].row * (1 << mv_shift),
+                     best_mv->col + neighbors[idx].col * (1 << mv_shift) };
       if (av1_is_subpelmv_in_range(mv_limits, this_mv)) {
         memcpy(pts, pts0, total_samples * 2 * sizeof(*pts0));
         memcpy(pts_inref, pts_inref0, total_samples * 2 * sizeof(*pts_inref0));
@@ -3323,8 +3445,9 @@ unsigned int av1_refine_warped_mv(MACROBLOCKD *xd, const AV1_COMMON *const cm,
     if (best_idx == -1) break;
 
     if (best_idx >= 0) {
-      best_mv->row += neighbors[best_idx].row;
-      best_mv->col += neighbors[best_idx].col;
+      best_mv->row += neighbors[best_idx].row * (1 << mv_shift);
+      best_mv->col += neighbors[best_idx].col * (1 << mv_shift);
+      valid_neighbors = neighbor_mask[best_idx];
     }
   }
 
@@ -3332,6 +3455,7 @@ unsigned int av1_refine_warped_mv(MACROBLOCKD *xd, const AV1_COMMON *const cm,
   mbmi->num_proj_ref = best_num_proj_ref;
   return bestmse;
 }
+
 #endif  // !CONFIG_REALTIME_ONLY
 // =============================================================================
 //  Subpixel Motion Search: OBMC

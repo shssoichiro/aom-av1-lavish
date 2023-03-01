@@ -99,7 +99,8 @@ void av1_convolve_2d_sr_c(const uint8_t *src, int src_stride, uint8_t *dst,
       for (int k = 0; k < filter_params_x->taps; ++k) {
         sum += x_filter[k] * src_horiz[y * src_stride + x - fo_horiz + k];
       }
-      assert(0 <= sum && sum < (1 << (bd + FILTER_BITS + 1)));
+      assert(filter_params_x->taps > 8 ||
+             (0 <= sum && sum < (1 << (bd + FILTER_BITS + 1))));
       im_block[y * im_stride + x] =
           (int16_t)ROUND_POWER_OF_TWO(sum, conv_params->round_0);
     }
@@ -200,7 +201,8 @@ void av1_dist_wtd_convolve_2d_c(const uint8_t *src, int src_stride,
       for (int k = 0; k < filter_params_x->taps; ++k) {
         sum += x_filter[k] * src_horiz[y * src_stride + x - fo_horiz + k];
       }
-      assert(0 <= sum && sum < (1 << (bd + FILTER_BITS + 1)));
+      assert(filter_params_x->taps > 8 ||
+             (0 <= sum && sum < (1 << (bd + FILTER_BITS + 1))));
       im_block[y * im_stride + x] =
           (int16_t)ROUND_POWER_OF_TWO(sum, conv_params->round_0);
     }
@@ -402,7 +404,8 @@ void av1_convolve_2d_scale_c(const uint8_t *src, int src_stride, uint8_t *dst,
       for (int k = 0; k < filter_params_x->taps; ++k) {
         sum += x_filter[k] * src_x[k - fo_horiz];
       }
-      assert(0 <= sum && sum < (1 << (bd + FILTER_BITS + 1)));
+      assert(filter_params_x->taps > 8 ||
+             (0 <= sum && sum < (1 << (bd + FILTER_BITS + 1))));
       im_block[y * im_stride + x] =
           (int16_t)ROUND_POWER_OF_TWO(sum, conv_params->round_0);
     }
@@ -618,7 +621,8 @@ void av1_highbd_convolve_2d_sr_c(const uint16_t *src, int src_stride,
       for (int k = 0; k < filter_params_x->taps; ++k) {
         sum += x_filter[k] * src_horiz[y * src_stride + x - fo_horiz + k];
       }
-      assert(0 <= sum && sum < (1 << (bd + FILTER_BITS + 1)));
+      assert(filter_params_x->taps > 8 ||
+             (0 <= sum && sum < (1 << (bd + FILTER_BITS + 1))));
       im_block[y * im_stride + x] =
           ROUND_POWER_OF_TWO(sum, conv_params->round_0);
     }
@@ -672,7 +676,8 @@ void av1_highbd_dist_wtd_convolve_2d_c(
       for (k = 0; k < filter_params_x->taps; ++k) {
         sum += x_filter[k] * src_horiz[y * src_stride + x - fo_horiz + k];
       }
-      assert(0 <= sum && sum < (1 << (bd + FILTER_BITS + 1)));
+      assert(filter_params_x->taps > 8 ||
+             (0 <= sum && sum < (1 << (bd + FILTER_BITS + 1))));
       (void)bd;
       im_block[y * im_stride + x] =
           (int16_t)ROUND_POWER_OF_TWO(sum, conv_params->round_0);
@@ -877,7 +882,8 @@ void av1_highbd_convolve_2d_scale_c(const uint16_t *src, int src_stride,
       for (int k = 0; k < filter_params_x->taps; ++k) {
         sum += x_filter[k] * src_x[k - fo_horiz];
       }
-      assert(0 <= sum && sum < (1 << (bd + FILTER_BITS + 1)));
+      assert(filter_params_x->taps > 8 ||
+             (0 <= sum && sum < (1 << (bd + FILTER_BITS + 1))));
       im_block[y * im_stride + x] =
           (int16_t)ROUND_POWER_OF_TWO(sum, conv_params->round_0);
     }

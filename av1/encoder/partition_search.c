@@ -2379,9 +2379,13 @@ static void pick_sb_modes_nonrd(AV1_COMP *const cpi, TileDataEnc *tile_data,
         get_mi_grid_idx(&cm->mi_params, mi_row_sb, mi_col_sb);
     // Do not skip if intra or new mv is picked, or color sensitivity is set.
     // Never skip on slide/scene change.
-    mi_sb[0]->cdef_strength =
-        mi_sb[0]->cdef_strength && allow_cdef_skipping &&
-        !(mbmi->mode < INTRA_MODES || mbmi->mode == NEWMV);
+    if (cpi->sf.rt_sf.skip_cdef_sb >= 2) {
+      mi_sb[0]->cdef_strength = mi_sb[0]->cdef_strength && allow_cdef_skipping;
+    } else {
+      mi_sb[0]->cdef_strength =
+          mi_sb[0]->cdef_strength && allow_cdef_skipping &&
+          !(mbmi->mode < INTRA_MODES || mbmi->mode == NEWMV);
+    }
     // Store in the pickmode context.
     ctx->mic.cdef_strength = mi_sb[0]->cdef_strength;
   }
@@ -5427,6 +5431,7 @@ BEGIN_PARTITION_SEARCH:
   // partition types and intra cnn output.
   if (x->must_find_valid_partition) {
     reset_part_limitations(cpi, &part_search_state);
+    av1_prune_partitions_by_max_min_bsize(&x->sb_enc, &part_search_state);
     // Invalidate intra cnn output for key frames.
     if (frame_is_intra_only(cm) && bsize == BLOCK_64X64) {
       part_search_state.intra_part_info->quad_tree_idx = 0;

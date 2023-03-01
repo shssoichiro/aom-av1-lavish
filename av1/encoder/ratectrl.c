@@ -426,6 +426,7 @@ void av1_rc_init(const AV1EncoderConfig *oxcf, RATE_CONTROL *rc) {
   rc->resize_count = 0;
   rc->rtc_external_ratectrl = 0;
   rc->frame_level_fast_extra_bits = 0;
+  rc->use_external_qp_one_pass = 0;
 }
 
 int av1_rc_drop_frame(AV1_COMP *cpi) {
@@ -774,8 +775,7 @@ void av1_rc_update_rate_correction_factors(AV1_COMP *cpi, int is_encode_stage,
 
   // Adjustment to delta Q and number of blocks updated in cyclic refressh
   // based on over or under shoot of target in current frame.
-  if (cyclic_refresh_active && (cpi->rc.this_frame_target > 0) &&
-      !cpi->ppi->use_svc) {
+  if (cyclic_refresh_active && cpi->rc.this_frame_target > 0) {
     CYCLIC_REFRESH *const cr = cpi->cyclic_refresh;
     if (correction_factor > 1.25) {
       cr->percent_refresh_adjustment =
@@ -1032,11 +1032,21 @@ static int calc_active_worst_quality_no_stats_cbr(const AV1_COMP *cpi) {
   ambient_qp = (cm->current_frame.frame_number < num_frames_weight_key)
                    ? AOMMIN(p_rc->avg_frame_qindex[INTER_FRAME], avg_qindex_key)
                    : p_rc->avg_frame_qindex[INTER_FRAME];
-  active_worst_quality = AOMMIN(rc->worst_quality, ambient_qp * 5 / 4);
+  ambient_qp = AOMMIN(rc->worst_quality, ambient_qp);
+
   if (p_rc->buffer_level > p_rc->optimal_buffer_level) {
     // Adjust down.
-    // Maximum limit for down adjustment, ~30%.
-    int max_adjustment_down = active_worst_quality / 3;
+    int max_adjustment_down;  // Maximum adjustment down for Q
+
+    if (cpi->oxcf.q_cfg.aq_mode == CYCLIC_REFRESH_AQ && !cpi->ppi->use_svc &&
+        (cpi->oxcf.tune_cfg.content == AOM_CONTENT_SCREEN)) {
+      active_worst_quality = AOMMIN(rc->worst_quality, ambient_qp);
+      max_adjustment_down = AOMMIN(4, active_worst_quality / 16);
+    } else {
+      active_worst_quality = AOMMIN(rc->worst_quality, ambient_qp * 5 / 4);
+      max_adjustment_down = active_worst_quality / 3;
+    }
+
     if (max_adjustment_down) {
       buff_lvl_step =
           ((p_rc->maximum_buffer_size - p_rc->optimal_buffer_level) /
@@ -1048,6 +1058,7 @@ static int calc_active_worst_quality_no_stats_cbr(const AV1_COMP *cpi) {
     }
   } else if (p_rc->buffer_level > critical_level) {
     // Adjust up from ambient Q.
+    active_worst_quality = AOMMIN(rc->worst_quality, ambient_qp);
     if (critical_level) {
       buff_lvl_step = (p_rc->optimal_buffer_level - critical_level);
       if (buff_lvl_step) {
@@ -1055,7 +1066,7 @@ static int calc_active_worst_quality_no_stats_cbr(const AV1_COMP *cpi) {
                            (p_rc->optimal_buffer_level - p_rc->buffer_level) /
                            buff_lvl_step);
       }
-      active_worst_quality = ambient_qp + adjustment;
+      active_worst_quality += adjustment;
     }
   } else {
     // Set to worst_quality if buffer is below critical level.
@@ -1222,7 +1233,7 @@ static int rc_pick_q_and_bounds_no_stats_cbr(const AV1_COMP *cpi, int width,
   if (current_frame->frame_type != KEY_FRAME && !cpi->ppi->use_svc &&
       current_frame->frame_number >= 10 && current_frame->frame_number <= 15) {
     q = AOMMIN(p_rc->last_kf_qindex + 108, AOMMAX(5, q - 9));
-    q = AOMMAX(q, rc->best_quality);
+    q = AOMMIN(rc->worst_quality, AOMMAX(q, rc->best_quality));
   }
 
   assert(*top_index <= rc->worst_quality && *top_index >= rc->best_quality);
@@ -3256,8 +3267,6 @@ void av1_get_one_pass_rt_params(AV1_COMP *cpi, FRAME_TYPE *const frame_type,
   const int layer =
       LAYER_IDS_TO_IDX(svc->spatial_layer_id, svc->temporal_layer_id,
                        svc->number_temporal_layers);
-  // Turn this on to explicitly set the reference structure rather than
-  // relying on internal/default structure.
   if (cpi->ppi->use_svc) {
     av1_update_temporal_layer_framerate(cpi);
     av1_restore_layer_context(cpi);

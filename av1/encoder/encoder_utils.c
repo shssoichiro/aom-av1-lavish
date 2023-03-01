@@ -812,7 +812,7 @@ BLOCK_SIZE av1_select_sb_size(const AV1EncoderConfig *const oxcf, int width,
       // per tile is low use 64X64 superblock.
       if (oxcf->row_mt == 1 && oxcf->max_threads >= 4 &&
           oxcf->max_threads >= num_tiles && AOMMIN(width, height) > 720 &&
-          (width * height) / (128 * 128 * num_tiles) <= 32)
+          (width * height) / (128 * 128 * num_tiles) <= 38)
         return BLOCK_64X64;
       else
         return AOMMIN(width, height) >= 720 ? BLOCK_128X128 : BLOCK_64X64;
@@ -1364,6 +1364,12 @@ void av1_set_mb_ssim_rdmult_scaling(AV1_COMP *cpi) {
         // Curve fitting with an exponential model on all 16x16 blocks from the
         // midres dataset.
         var = 67.035434 * (1 - exp(-0.0021489 * var)) + 17.492222;
+        // As per the above computation, var will be in the range of
+        // [17.492222, 84.527656], assuming the data type is of infinite
+        // precision. The following assert conservatively checks if var is in the
+        // range of [17.0, 85.0] to avoid any issues due to the precision of the
+        // relevant data type.
+        assert(var > 17.0 && var < 85.0);
       }
       cpi->ssim_rdmult_scaling_factors[index] = var;
       log_sum += log(var);
@@ -1418,7 +1424,12 @@ void av1_set_mb_ssim_rdmult_scaling(AV1_COMP *cpi) {
       }
     }
   } else {
-    log_sum = exp(log_sum / (double)(num_rows * num_cols));
+  
+  // As log_sum holds the geometric mean, it will be in the range
+  // [17.492222, 84.527656]. Hence, in the below loop, the value of
+  // cpi->ssim_rdmult_scaling_factors[index] would be in the range
+  // [0.2069, 4.8323].
+  log_sum = exp(log_sum / (double)(num_rows * num_cols));
 
     for (int row = 0; row < num_rows; ++row) {
       for (int col = 0; col < num_cols; ++col) {

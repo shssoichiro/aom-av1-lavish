@@ -1081,6 +1081,15 @@ typedef struct AV1EncoderConfig {
   // CONFIG_PARTITION_SEARCH_ORDER.
   const char *partition_info_path;
 
+  // The flag that indicates whether we use an external rate distribution to
+  // guide adaptive quantization. It requires --deltaq-mode=3. The rate
+  // distribution map file name is stored in |rate_distribution_info|.
+  unsigned int enable_rate_guide_deltaq;
+
+  // The input file of rate distribution information used in all intra mode
+  // to determine delta quantization.
+  const char *rate_distribution_info;
+
   // Exit the encoder when it fails to encode to a given level.
   int strict_level_conformance;
 
@@ -3434,6 +3443,23 @@ typedef struct AV1_COMP {
   WeberStats *mb_weber_stats;
 
   /*!
+   * Buffer to store rate cost estimates for each macro block (8x8) in the
+   * preprocessing stage used in allintra mode.
+   */
+  int *prep_rate_estimates;
+
+  /*!
+   * Buffer to store rate cost estimates for each 16x16 block read
+   * from an external file, used in allintra mode.
+   */
+  double *ext_rate_distribution;
+
+  /*!
+   * The scale that equals sum_rate_uniform_quantizer / sum_ext_rate.
+   */
+  double ext_rate_scale;
+
+  /*!
    * Buffer to store MB variance after Wiener filter.
    */
   BLOCK_SIZE weber_bsize;
@@ -3520,6 +3546,11 @@ typedef struct AV1_COMP {
    *  This is currently only used for global motion
    */
   int image_pyramid_levels;
+
+  /*!
+   * Pixel level saliency map for each frame.
+   */
+  uint8_t *saliency_map;
 } AV1_COMP;
 
 /*!
@@ -3657,11 +3688,11 @@ int av1_init_parallel_frame_context(const AV1_COMP_DATA *const first_cpi_data,
  * \ingroup high_level_algo
  * This function receives the raw frame data from input.
  *
- * \param[in]    cpi            Top-level encoder structure
- * \param[in]    frame_flags    Flags to decide how to encoding the frame
- * \param[in]    sd             Contain raw frame data
- * \param[in]    time_stamp     Time stamp of the frame
- * \param[in]    end_time_stamp End time stamp
+ * \param[in]     cpi            Top-level encoder structure
+ * \param[in]     frame_flags    Flags to decide how to encoding the frame
+ * \param[in,out] sd             Contain raw frame data
+ * \param[in]     time_stamp     Time stamp of the frame
+ * \param[in]     end_time_stamp End time stamp
  *
  * \return Returns a value to indicate if the frame data is received
  * successfully.

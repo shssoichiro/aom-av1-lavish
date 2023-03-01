@@ -238,6 +238,8 @@ static const int av1_arg_ctrl_map[] = { AOME_SET_CPUUSED,
                                         AV1E_SET_ENABLE_TX_SIZE_SEARCH,
                                         AV1E_SET_LOOPFILTER_CONTROL,
                                         AV1E_SET_AUTO_INTRA_TOOLS_OFF,
+                                        AV1E_ENABLE_RATE_GUIDE_DELTAQ,
+                                        AV1E_SET_RATE_DISTRIBUTION_INFO,
                                         AOME_SET_DQ_MODULATE,
                                         AOME_SET_DELTA_QINDEX_MULT,
                                         AOME_SET_DELTA_QINDEX_MULT_POS,
@@ -470,6 +472,8 @@ const arg_def_t *av1_ctrl_args[] = {
 #endif
   &g_av1_codec_arg_defs.dv_cost_upd_freq,
   &g_av1_codec_arg_defs.partition_info_path,
+  &g_av1_codec_arg_defs.enable_rate_guide_deltaq,
+  &g_av1_codec_arg_defs.rate_distribution_info,
   &g_av1_codec_arg_defs.enable_directional_intra,
   &g_av1_codec_arg_defs.enable_tx_size_search,
   &g_av1_codec_arg_defs.loopfilter_control,
@@ -598,6 +602,8 @@ struct stream_config {
   const char *vmaf_model_path;
 #endif
   const char *partition_info_path;
+  unsigned int enable_rate_guide_deltaq;
+  const char *rate_distribution_info;
   aom_color_range_t color_range;
   const char *two_pass_input;
   const char *two_pass_output;
@@ -1195,6 +1201,12 @@ static int parse_stream_params(struct AvxEncoderConfig *global,
     } else if (arg_match(&arg, &g_av1_codec_arg_defs.partition_info_path,
                          argi)) {
       config->partition_info_path = arg.val;
+    } else if (arg_match(&arg, &g_av1_codec_arg_defs.enable_rate_guide_deltaq,
+                         argi)) {
+      config->enable_rate_guide_deltaq = arg_parse_uint(&arg);
+    } else if (arg_match(&arg, &g_av1_codec_arg_defs.rate_distribution_info,
+                         argi)) {
+      config->rate_distribution_info = arg.val;
     } else if (arg_match(&arg, &g_av1_codec_arg_defs.use_fixed_qp_offsets,
                          argi)) {
       config->cfg.use_fixed_qp_offsets = arg_parse_uint(&arg);
@@ -1604,6 +1616,16 @@ static void initialize_encoder(struct stream_state *stream,
     AOM_CODEC_CONTROL_TYPECHECKED(&stream->encoder,
                                   AV1E_SET_PARTITION_INFO_PATH,
                                   stream->config.partition_info_path);
+  }
+  if (stream->config.enable_rate_guide_deltaq) {
+    AOM_CODEC_CONTROL_TYPECHECKED(&stream->encoder,
+                                  AV1E_ENABLE_RATE_GUIDE_DELTAQ,
+                                  stream->config.enable_rate_guide_deltaq);
+  }
+  if (stream->config.rate_distribution_info) {
+    AOM_CODEC_CONTROL_TYPECHECKED(&stream->encoder,
+                                  AV1E_SET_RATE_DISTRIBUTION_INFO,
+                                  stream->config.rate_distribution_info);
   }
 
   if (stream->config.film_grain_filename) {

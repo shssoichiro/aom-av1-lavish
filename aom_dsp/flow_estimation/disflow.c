@@ -12,6 +12,9 @@
 // Dense Inverse Search flow algorithm
 // Paper: https://arxiv.org/abs/1603.03590
 
+#include <assert.h>
+#include <math.h>
+
 #include "aom_dsp/aom_dsp_common.h"
 #include "aom_dsp/flow_estimation/corner_detect.h"
 #include "aom_dsp/flow_estimation/disflow.h"
@@ -26,8 +29,6 @@
 // replacing av1_upscale_plane_double_prec().
 // Then we can avoid needing to include code from av1/
 #include "av1/common/resize.h"
-
-#include <assert.h>
 
 // Amount to downsample the flow field by.
 // eg. DOWNSAMPLE_SHIFT = 2 (DOWNSAMPLE_FACTOR == 4) means we calculate
@@ -287,25 +288,37 @@ static INLINE void sobel_filter(const uint8_t *src, int src_stride,
 }
 
 // Computes the components of the system of equations used to solve for
-// a flow vector. This includes:
-// 1.) An approximation to the Hessian. We do not compute the Hessian of the
-//     actual error function, as this involves second derivatives of the image
-//     and so is very noise-sensitive.
+// a flow vector.
 //
-//     Instead, we approximate that the error will be a quadratic function of
-//     the x and y coordinates when we are close to convergence, which leads
-//     to an approximate Hessian of the form:
+// The flow equations are a least-squares system, derived as follows:
 //
-//       M = |sum(dx * dx)  sum(dx * dy)|
-//           |sum(dx * dy)  sum(dy * dy)|
+// For each pixel in the patch, we calculate the current error `dt`,
+// and the x and y gradients `dx` and `dy` of the source patch.
+// This means that, to first order, the squared error for this pixel is
 //
-// 2.)   b = |sum(dx * dt)|
-//           |sum(dy * dt)|
+//    (dt + u * dx + v * dy)^2
 //
-// Where the sums are computed over a square window of DISFLOW_PATCH_SIZE.
-static INLINE void compute_hessian(const int16_t *dx, int dx_stride,
-                                   const int16_t *dy, int dy_stride,
-                                   double *M) {
+// where (u, v) are the incremental changes to the flow vector.
+//
+// We then want to find the values of u and v which minimize the sum
+// of the squared error across all pixels. Conveniently, this fits exactly
+// into the form of a least squares problem, with one equation
+//
+//   u * dx + v * dy = -dt
+//
+// for each pixel.
+//
+// Summing across all pixels in a square window of size DISFLOW_PATCH_SIZE,
+// and absorbing the - sign elsewhere, this results in the least squares system
+//
+//   M = |sum(dx * dx)  sum(dx * dy)|
+//       |sum(dx * dy)  sum(dy * dy)|
+//
+//   b = |sum(dx * dt)|
+//       |sum(dy * dt)|
+static INLINE void compute_flow_matrix(const int16_t *dx, int dx_stride,
+                                       const int16_t *dy, int dy_stride,
+                                       double *M) {
   int tmp[4] = { 0 };
 
   for (int i = 0; i < DISFLOW_PATCH_SIZE; i++) {
@@ -316,6 +329,18 @@ static INLINE void compute_hessian(const int16_t *dx, int dx_stride,
       tmp[3] += dy[i * dy_stride + j] * dy[i * dy_stride + j];
     }
   }
+
+  // Apply regularization
+  // We follow the standard regularization method of adding `k * I` before
+  // inverting. This ensures that the matrix will be invertible.
+  //
+  // Setting the regularization strength k to 1 seems to work well here, as
+  // typical values coming from the other equations are very large (1e5 to
+  // 1e6, with an upper limit of around 6e7, at the time of writing).
+  // It also preserves the property that all matrix values are whole numbers,
+  // which is convenient for integerized SIMD implementation.
+  tmp[0] += 1;
+  tmp[3] += 1;
 
   tmp[2] = tmp[1];
 
@@ -339,25 +364,21 @@ static INLINE void compute_flow_vector(const int16_t *dx, int dx_stride,
   }
 }
 
+// Try to invert the matrix M
+// Note: Due to the nature of how a least-squares matrix is constructed, all of
+// the eigenvalues will be >= 0, and therefore det M >= 0 as well.
+// The regularization term `+ k * I` further ensures that det M >= k^2.
+// As mentioned in compute_flow_matrix(), here we use k = 1, so det M >= 1.
+// So we don't have to worry about non-invertible matrices here.
 static INLINE void invert_2x2(const double *M, double *M_inv) {
-  double M_0 = M[0];
-  double M_3 = M[3];
-  double det = (M_0 * M_3) - (M[1] * M[2]);
-  if (det < 1e-5) {
-    // Handle singular matrix
-    // TODO(sarahparker) compare results using pseudo inverse instead
-    M_0 += 1e-10;
-    M_3 += 1e-10;
-    det = (M_0 * M_3) - (M[1] * M[2]);
-  }
+  double det = (M[0] * M[3]) - (M[1] * M[2]);
+  assert(det >= 1);
   const double det_inv = 1 / det;
 
-  // TODO(rachelbarker): Is using regularized values
-  // or original values better here?
-  M_inv[0] = M_3 * det_inv;
+  M_inv[0] = M[3] * det_inv;
   M_inv[1] = -M[1] * det_inv;
   M_inv[2] = -M[2] * det_inv;
-  M_inv[3] = M_0 * det_inv;
+  M_inv[3] = M[0] * det_inv;
 }
 
 void aom_compute_flow_at_point_c(const uint8_t *src, const uint8_t *ref, int x,
@@ -377,7 +398,7 @@ void aom_compute_flow_at_point_c(const uint8_t *src, const uint8_t *ref, int x,
   sobel_filter(src_patch, stride, dx, DISFLOW_PATCH_SIZE, 1);
   sobel_filter(src_patch, stride, dy, DISFLOW_PATCH_SIZE, 0);
 
-  compute_hessian(dx, DISFLOW_PATCH_SIZE, dy, DISFLOW_PATCH_SIZE, M);
+  compute_flow_matrix(dx, DISFLOW_PATCH_SIZE, dy, DISFLOW_PATCH_SIZE, M);
   invert_2x2(M, M_inv);
 
   for (int itr = 0; itr < DISFLOW_MAX_ITR; itr++) {
@@ -626,13 +647,6 @@ int av1_compute_global_motion_disflow(TransformationType type,
 
   aom_free(correspondences);
   free_flow_field(flow);
-
-  // Set num_inliers = 0 for motions with too few inliers so they are ignored.
-  for (int i = 0; i < num_motion_models; ++i) {
-    if (motion_models[i].num_inliers < MIN_INLIER_PROB * num_correspondences) {
-      motion_models[i].num_inliers = 0;
-    }
-  }
 
   // Return true if any one of the motions has inliers.
   for (int i = 0; i < num_motion_models; ++i) {

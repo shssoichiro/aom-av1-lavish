@@ -16,8 +16,10 @@
 #include <cerrno>
 #include <cstring>
 #include <fstream>
+#include <istream>
 #include <memory>
 #include <numeric>
+#include <ostream>
 #include <random>
 #include <string>
 #include <unordered_set>
@@ -246,12 +248,16 @@ class RateControlQModeTest : public ::testing::Test {
 TEST_F(RateControlQModeTest, ConstructGopARF) {
   int show_frame_count = 16;
   const bool has_key_frame = false;
+  const bool has_arf_frame = true;
+  const bool use_prev_arf = true;
+  const double base_q_ratio = 1.0;
   const int global_coding_idx_offset = 5;
   const int global_order_idx_offset = 20;
   RefFrameManager ref_frame_manager(kRefFrameTableSize, 7);
   GopStruct gop_struct =
       ConstructGop(&ref_frame_manager, show_frame_count, has_key_frame,
-                   global_coding_idx_offset, global_order_idx_offset);
+                   has_arf_frame, use_prev_arf, global_coding_idx_offset,
+                   global_order_idx_offset, base_q_ratio);
   EXPECT_EQ(gop_struct.show_frame_count, show_frame_count);
   TestGopDisplayOrder(gop_struct);
   TestGopGlobalOrderIdx(gop_struct, global_order_idx_offset);
@@ -265,12 +271,16 @@ TEST_F(RateControlQModeTest, ConstructGopARF) {
 TEST_F(RateControlQModeTest, ConstructGopKey) {
   const int show_frame_count = 16;
   const bool has_key_frame = true;
+  const bool has_arf_frame = true;
+  const bool use_prev_arf = false;
+  const double base_q_ratio = 1.0;
   const int global_coding_idx_offset = 10;
   const int global_order_idx_offset = 8;
   RefFrameManager ref_frame_manager(kRefFrameTableSize, 7);
   GopStruct gop_struct =
       ConstructGop(&ref_frame_manager, show_frame_count, has_key_frame,
-                   global_coding_idx_offset, global_order_idx_offset);
+                   has_arf_frame, use_prev_arf, global_coding_idx_offset,
+                   global_order_idx_offset, base_q_ratio);
   EXPECT_EQ(gop_struct.show_frame_count, show_frame_count);
   TestGopDisplayOrder(gop_struct);
   TestGopGlobalOrderIdx(gop_struct, global_order_idx_offset);
@@ -284,12 +294,16 @@ TEST_F(RateControlQModeTest, ConstructGopKey) {
 TEST_F(RateControlQModeTest, ConstructShortGop) {
   int show_frame_count = 2;
   const bool has_key_frame = false;
+  const bool has_arf_frame = false;
+  const bool use_prev_arf = true;
+  const double base_q_ratio = 1.0;
   const int global_coding_idx_offset = 5;
   const int global_order_idx_offset = 20;
   RefFrameManager ref_frame_manager(kRefFrameTableSize, 7);
   GopStruct gop_struct =
       ConstructGop(&ref_frame_manager, show_frame_count, has_key_frame,
-                   global_coding_idx_offset, global_order_idx_offset);
+                   has_arf_frame, use_prev_arf, global_coding_idx_offset,
+                   global_order_idx_offset, base_q_ratio);
   EXPECT_EQ(gop_struct.show_frame_count, show_frame_count);
   TestGopDisplayOrder(gop_struct);
   TestGopGlobalOrderIdx(gop_struct, global_order_idx_offset);
@@ -309,7 +323,7 @@ static TplBlockStats CreateToyTplBlockStats(int h, int w, int r, int c,
   tpl_block_stats.col = c;
   tpl_block_stats.intra_cost = intra_cost;
   tpl_block_stats.inter_cost = inter_cost;
-  tpl_block_stats.ref_frame_index = { -1, -1 };
+  tpl_block_stats.ref_frame_index = { kNoRefFrame, kNoRefFrame };
   return tpl_block_stats;
 }
 
@@ -370,8 +384,8 @@ static RefFrameTable CreateToyRefFrameTable(int frame_count) {
   return ref_frame_table;
 }
 
-static MotionVector CreateFullpelMv(int row, int col) {
-  return { row, col, 0 };
+static MotionVector CreateFullpelMv(int16_t row, int16_t col) {
+  return { row, col };
 }
 
 double TplFrameStatsAccumulateIntraCost(const TplFrameStats &frame_stats) {
@@ -438,7 +452,7 @@ TEST_F(RateControlQModeTest, TplBlockStatsToDepStats) {
   TplBlockStats block_stats =
       CreateToyTplBlockStats(8, 4, 0, 0, intra_cost, inter_cost);
   TplUnitDepStats unit_stats = TplBlockStatsToDepStats(
-      block_stats, unit_count, /*rate_dist_present=*/false);
+      block_stats, unit_count, TplPropagationMode::kRdCost);
   double expected_intra_cost = intra_cost * 1.0 / unit_count;
   EXPECT_NEAR(unit_stats.intra_cost, expected_intra_cost, kErrorEpsilon);
   // When inter_cost >= intra_cost in block_stats, in unit_stats,
@@ -455,7 +469,7 @@ TEST_F(RateControlQModeTest, TplBlockStatsToDepStatsUsingPredErr) {
   block_stats.intra_pred_err = 40;
   block_stats.inter_pred_err = 50;
   TplUnitDepStats unit_stats = TplBlockStatsToDepStats(
-      block_stats, unit_count, /*rate_dist_present=*/true);
+      block_stats, unit_count, TplPropagationMode::kPredError);
   double expected_intra_cost = block_stats.intra_pred_err * 1.0 / unit_count;
   EXPECT_NEAR(unit_stats.intra_cost, expected_intra_cost, kErrorEpsilon);
   // When inter_cost >= intra_cost in block_stats, in unit_stats,
@@ -463,96 +477,92 @@ TEST_F(RateControlQModeTest, TplBlockStatsToDepStatsUsingPredErr) {
   EXPECT_LE(unit_stats.inter_cost, unit_stats.intra_cost);
 }
 
-TEST_F(RateControlQModeTest, TplFrameDepStatsPropagateSingleZeroMotion) {
-  // cur frame with coding_idx 1 use ref frame with coding_idx 0
-  const std::array<int, kBlockRefCount> ref_frame_index = { 0, -1 };
-  TplFrameStats frame_stats = CreateToyTplFrameStatsWithDiffSizes(8, 16);
-  AugmentTplFrameStatsWithRefFrames(&frame_stats, ref_frame_index);
+struct ZeroMotionPropagationTestParams {
+  std::string name;
+  // Indices of reference frames to be used by the "current" frame.
+  std::vector<int> refs_for_frame;
+  // Value of TplBlockStats::ref_frame_index for blocks of the current frame.
+  std::array<int, kBlockRefCount> refs_for_blocks;
+  // Expected fraction of intra cost attributable to each reference frame.
+  // Must have the same number of elements as refs_for_frame.
+  std::vector<double> expected_fraction;
+};
 
-  TplGopDepStats gop_dep_stats;
-  const int frame_count = 2;
-  // ref frame with coding_idx 0
-  TplFrameDepStats frame_dep_stats0 =
-      CreateTplFrameDepStats(frame_stats.frame_height, frame_stats.frame_width,
-                             frame_stats.min_block_size, false);
-  gop_dep_stats.frame_dep_stats_list.push_back(frame_dep_stats0);
-
-  // cur frame with coding_idx 1
-  const StatusOr<TplFrameDepStats> frame_dep_stats1 =
-      CreateTplFrameDepStatsWithoutPropagation(frame_stats);
-  ASSERT_THAT(frame_dep_stats1.status(), IsOkStatus());
-  gop_dep_stats.frame_dep_stats_list.push_back(std::move(*frame_dep_stats1));
-
-  const RefFrameTable ref_frame_table = CreateToyRefFrameTable(frame_count);
-  TplFrameDepStatsPropagate(/*coding_idx=*/1, ref_frame_table, &gop_dep_stats);
-
-  // cur frame with coding_idx 1
-  const double expected_propagation_sum =
-      TplFrameStatsAccumulateIntraCost(frame_stats);
-
-  // ref frame with coding_idx 0
-  const double propagation_sum =
-      TplFrameDepStatsAccumulate(gop_dep_stats.frame_dep_stats_list[0]);
-
-  // The propagation_sum between coding_idx 0 and coding_idx 1 should be equal
-  // because every block in cur frame has zero motion, use ref frame with
-  // coding_idx 0 for prediction, and ref frame itself is empty.
-  EXPECT_NEAR(propagation_sum, expected_propagation_sum, kErrorEpsilon);
+std::ostream &operator<<(std::ostream &os,
+                         const ZeroMotionPropagationTestParams &params) {
+  return os << "ZeroMotionPropagationTestParams { name:" << params.name << " }";
 }
 
-TEST_F(RateControlQModeTest, TplFrameDepStatsPropagateCompoundZeroMotion) {
-  // cur frame with coding_idx 2 use two ref frames with coding_idx 0 and 1
-  const std::array<int, kBlockRefCount> ref_frame_index = { 0, 1 };
+std::vector<ZeroMotionPropagationTestParams>
+CreateZeroMotionPropagationTestParams() {
+  return {
+    { "single", { 0 }, { 0, kNoRefFrame }, { 1 } },
+    { "compound", { 0, 1 }, { 0, 1 }, { 0.5, 0.5 } },
+    // When the reference frame for a block is unknown, it should arbitrarily
+    // be assumed to have used the frame's first reference frame.
+    { "unknown", { 1, 2, 0 }, { kUnknownRefFrame, kNoRefFrame }, { 0, 1, 0 } },
+  };
+}
+
+class ZeroMotionPropagationTest
+    : public ::testing::TestWithParam<ZeroMotionPropagationTestParams> {};
+
+INSTANTIATE_TEST_SUITE_P(
+    , ZeroMotionPropagationTest,
+    ::testing::ValuesIn(CreateZeroMotionPropagationTestParams()),
+    [](const ::testing::TestParamInfo<ZeroMotionPropagationTestParams> &info) {
+      return info.param.name;
+    });
+
+TEST_P(ZeroMotionPropagationTest, ZeroMotionPropagationTest) {
   TplFrameStats frame_stats = CreateToyTplFrameStatsWithDiffSizes(8, 16);
-  AugmentTplFrameStatsWithRefFrames(&frame_stats, ref_frame_index);
 
   TplGopDepStats gop_dep_stats;
-  const int frame_count = 3;
-  // ref frame with coding_idx 0
-  const TplFrameDepStats frame_dep_stats0 =
-      CreateTplFrameDepStats(frame_stats.frame_height, frame_stats.frame_width,
-                             frame_stats.min_block_size, false);
-  gop_dep_stats.frame_dep_stats_list.push_back(frame_dep_stats0);
+  const int num_ref_frames = static_cast<int>(GetParam().refs_for_frame.size());
+  ASSERT_EQ(static_cast<int>(GetParam().expected_fraction.size()),
+            num_ref_frames);
 
-  // ref frame with coding_idx 1
-  const TplFrameDepStats frame_dep_stats1 =
-      CreateTplFrameDepStats(frame_stats.frame_height, frame_stats.frame_width,
-                             frame_stats.min_block_size, false);
-  gop_dep_stats.frame_dep_stats_list.push_back(frame_dep_stats1);
+  // Create stats for reference frames.
+  for (int i = 0; i < num_ref_frames; ++i) {
+    gop_dep_stats.frame_dep_stats_list.push_back(CreateTplFrameDepStats(
+        frame_stats.frame_height, frame_stats.frame_width,
+        frame_stats.min_block_size, false));
+  }
 
-  // cur frame with coding_idx 2
-  const StatusOr<TplFrameDepStats> frame_dep_stats2 =
+  // Create stats for current frame.
+  AugmentTplFrameStatsWithRefFrames(&frame_stats, GetParam().refs_for_blocks);
+  frame_stats.ref_frame_indices = GetParam().refs_for_frame;
+  const StatusOr<TplFrameDepStats> cur_frame_dep_stats =
       CreateTplFrameDepStatsWithoutPropagation(frame_stats);
-  ASSERT_THAT(frame_dep_stats2.status(), IsOkStatus());
-  gop_dep_stats.frame_dep_stats_list.push_back(std::move(*frame_dep_stats2));
+  ASSERT_THAT(cur_frame_dep_stats.status(), IsOkStatus());
+  gop_dep_stats.frame_dep_stats_list.push_back(std::move(*cur_frame_dep_stats));
 
-  const RefFrameTable ref_frame_table = CreateToyRefFrameTable(frame_count);
-  TplFrameDepStatsPropagate(/*coding_idx=*/2, ref_frame_table, &gop_dep_stats);
+  const RefFrameTable ref_frame_table =
+      CreateToyRefFrameTable(num_ref_frames + 1);
+  TplFrameDepStatsPropagate(/*coding_idx=*/num_ref_frames, ref_frame_table,
+                            &gop_dep_stats);
 
-  // cur frame with coding_idx 1
-  const double expected_ref_sum = TplFrameStatsAccumulateIntraCost(frame_stats);
+  const double intra_cost = TplFrameStatsAccumulateIntraCost(frame_stats);
 
-  // ref frame with coding_idx 0
-  const double cost_sum0 =
-      TplFrameDepStatsAccumulate(gop_dep_stats.frame_dep_stats_list[0]);
-  EXPECT_NEAR(cost_sum0, expected_ref_sum * 0.5, kErrorEpsilon);
-
-  // ref frame with coding_idx 1
-  const double cost_sum1 =
-      TplFrameDepStatsAccumulate(gop_dep_stats.frame_dep_stats_list[1]);
-  EXPECT_NEAR(cost_sum1, expected_ref_sum * 0.5, kErrorEpsilon);
+  for (int i = 0; i < num_ref_frames; ++i) {
+    EXPECT_NEAR(
+        TplFrameDepStatsAccumulate(gop_dep_stats.frame_dep_stats_list[i]),
+        std::max(intra_cost * GetParam().expected_fraction[i], 1.0),
+        kErrorEpsilon)
+        << "on frame " << i;
+  }
 }
 
 TEST_F(RateControlQModeTest, TplFrameDepStatsPropagateSingleWithMotion) {
   // cur frame with coding_idx 1 use ref frame with coding_idx 0
-  const std::array<int, kBlockRefCount> ref_frame_index = { 0, -1 };
-  const int min_block_size = 8;
+  const std::array<int, kBlockRefCount> ref_frame_index = { 0, kNoRefFrame };
+  const int16_t min_block_size = 8;
   TplFrameStats frame_stats =
       CreateToyTplFrameStatsWithDiffSizes(min_block_size, min_block_size * 2);
   AugmentTplFrameStatsWithRefFrames(&frame_stats, ref_frame_index);
 
-  const int mv_row = min_block_size / 2;
-  const int mv_col = min_block_size / 4;
+  const int16_t mv_row = min_block_size / 2;
+  const int16_t mv_col = min_block_size / 4;
   const double r_ratio = 1.0 / 2;
   const double c_ratio = 1.0 / 4;
   std::array<MotionVector, kBlockRefCount> mv;
@@ -611,7 +621,8 @@ TEST_F(RateControlQModeTest, ComputeTplGopDepStats) {
   gop_struct.show_frame_count = 3;
   for (int i = 0; i < 3; i++) {
     // Use the previous frame as reference
-    const std::array<int, kBlockRefCount> ref_frame_index = { i - 1, -1 };
+    const std::array<int, kBlockRefCount> ref_frame_index = { i - 1,
+                                                              kNoRefFrame };
     int min_block_size = 8;
     TplFrameStats frame_stats =
         CreateToyTplFrameStatsWithDiffSizes(min_block_size, min_block_size * 2);
@@ -1125,7 +1136,7 @@ TEST_F(RateControlQModeTest, GetGopEncodeInfoRefFrameMissingBlockStats) {
 
   // Only frame 0 has TPL block stats.
   TplGopStats tpl_gop_stats;
-  tpl_gop_stats.frame_stats_list.assign(3, { 8, 176, 144, false, {}, {} });
+  tpl_gop_stats.frame_stats_list.assign(3, { 8, 176, 144, false, {}, {}, {} });
   tpl_gop_stats.frame_stats_list[0] = CreateToyTplFrameStatsWithDiffSizes(8, 8);
 
   AV1RateControlQMode rc;
@@ -1196,9 +1207,3 @@ TEST_F(RateControlQModeTest, TestKMeans) {
 }
 
 }  // namespace aom
-
-int main(int argc, char **argv) {
-  ::testing::InitGoogleTest(&argc, argv);
-  std::srand(0);
-  return RUN_ALL_TESTS();
-}

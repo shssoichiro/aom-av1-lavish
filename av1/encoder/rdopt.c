@@ -1429,7 +1429,8 @@ static int64_t motion_mode_rd(
 
           // Refine MV in a small range.
           av1_refine_warped_mv(xd, cm, &ms_params, bsize, pts0, pts_inref0,
-                               total_samples);
+                               total_samples, cpi->sf.mv_sf.warp_search_method,
+                               cpi->sf.mv_sf.warp_search_iters);
 
           if (mv0.as_int != mbmi->mv[0].as_int) {
             // Keep the refined MV and WM parameters.
@@ -1670,6 +1671,10 @@ static int64_t skip_mode_rd(RD_STATS *rd_stats, const AV1_COMP *const cpi,
 
 // Check NEARESTMV, NEARMV, GLOBALMV ref mvs for duplicate and skip the relevant
 // mode
+// Note(rachelbarker): This speed feature currently does not interact correctly
+// with global motion. The issue is that, when global motion is used, GLOBALMV
+// produces a different prediction to NEARESTMV/NEARMV even if the motion
+// vectors are the same. Thus GLOBALMV should not be pruned in this case.
 static INLINE int check_repeat_ref_mv(const MB_MODE_INFO_EXT *mbmi_ext,
                                       int ref_idx,
                                       const MV_REFERENCE_FRAME *ref_frame,

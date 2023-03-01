@@ -76,6 +76,7 @@
 #include "av1/encoder/rc_utils.h"
 #include "av1/encoder/rd.h"
 #include "av1/encoder/rdopt.h"
+#include "av1/encoder/saliency_map.h"
 #include "av1/encoder/segmentation.h"
 #include "av1/encoder/speed_features.h"
 #include "av1/encoder/superres_scale.h"
@@ -860,6 +861,14 @@ void av1_change_config(struct AV1_COMP *cpi, const AV1EncoderConfig *oxcf,
   rc->worst_quality = rc_cfg->worst_allowed_q;
   rc->best_quality = rc_cfg->best_allowed_q;
 
+  // If lossless has been requested make sure average Q accumulators are reset.
+  if (is_lossless_requested(&cpi->oxcf.rc_cfg)) {
+    int i;
+    for (i = 0; i < FRAME_TYPES; ++i) {
+      p_rc->avg_frame_qindex[i] = 0;
+    }
+  }
+
   features->interp_filter =
       oxcf->tile_cfg.enable_large_scale_tile ? EIGHTTAP_REGULAR : SWITCHABLE;
   features->switchable_motion_mode = is_switchable_motion_mode_allowed(
@@ -1386,6 +1395,12 @@ AV1_COMP *av1_create_compressor(AV1_PRIMARY *ppi, const AV1EncoderConfig *oxcf,
 
   cpi->refresh_frame.alt_ref_frame = false;
 
+  if (oxcf->tune_cfg.tuning == AOM_TUNE_VMAF_SALIENCY_MAP) {
+    CHECK_MEM_ERROR(cm, cpi->saliency_map,
+                    (uint8_t *)aom_calloc(cm->height * cm->width,
+                                          sizeof(*cpi->saliency_map)));
+  }
+
 #if CONFIG_SPEED_STATS
   cpi->tx_search_count = 0;
 #endif  // CONFIG_SPEED_STATS
@@ -1684,6 +1699,7 @@ void av1_remove_compressor(AV1_COMP *cpi) {
 
   aom_free(cm->error);
   aom_free(cpi->td.tctx);
+  aom_free(cpi->saliency_map);
   MultiThreadInfo *const mt_info = &cpi->mt_info;
 #if CONFIG_MULTITHREAD
   pthread_mutex_t *const enc_row_mt_mutex_ = mt_info->enc_row_mt.mutex_;
@@ -2507,7 +2523,8 @@ static int encode_without_recode(AV1_COMP *cpi) {
   av1_set_size_dependent_vars(cpi, &q, &bottom_index, &top_index);
   av1_set_mv_search_params(cpi);
 
-  if (cm->current_frame.frame_number == 0 && cpi->ppi->use_svc) {
+  if (cm->current_frame.frame_number == 0 && cpi->ppi->use_svc &&
+      cpi->svc.temporal_layer_id == 0) {
     const SequenceHeader *seq_params = cm->seq_params;
     if (aom_alloc_frame_buffer(
             &cpi->svc.source_last_TL0, cpi->oxcf.frm_dim_cfg.width,
@@ -3763,13 +3780,17 @@ static int encode_frame_to_data_rate(AV1_COMP *cpi, size_t *size,
       oxcf->tune_cfg.tuning == AOM_TUNE_LAVISH_FAST ||
       oxcf->tune_cfg.tuning == AOM_TUNE_OMNI) {
     av1_set_mb_ssim_rdmult_scaling(cpi);
+  } else if (oxcf->tune_cfg.tuning == AOM_TUNE_VMAF_SALIENCY_MAP &&
+             !(cpi->source->flags & YV12_FLAG_HIGHBITDEPTH)) {
+    if (av1_set_saliency_map(cpi) == 0) {
+      return AOM_CODEC_MEM_ERROR;
+    }
   }
-
 #if CONFIG_TUNE_VMAF
-  if (oxcf->tune_cfg.tuning == AOM_TUNE_VMAF_WITHOUT_PREPROCESSING ||
-      oxcf->tune_cfg.tuning == AOM_TUNE_VMAF_MAX_GAIN ||
-      oxcf->tune_cfg.tuning == AOM_TUNE_VMAF_NEG_MAX_GAIN ||
-      oxcf->tune_cfg.tuning == AOM_TUNE_LAVISH_VMAF_RD) {
+  else if (oxcf->tune_cfg.tuning == AOM_TUNE_VMAF_WITHOUT_PREPROCESSING ||
+           oxcf->tune_cfg.tuning == AOM_TUNE_VMAF_MAX_GAIN ||
+           oxcf->tune_cfg.tuning == AOM_TUNE_VMAF_NEG_MAX_GAIN ||
+            oxcf->tune_cfg.tuning == AOM_TUNE_LAVISH_VMAF_RD) {
     av1_set_mb_vmaf_rdmult_scaling(cpi);
   }
 #endif
@@ -4784,6 +4805,9 @@ int av1_get_compressed_data(AV1_COMP *cpi, AV1_COMP_DATA *const cpi_data) {
     }
   }
 #endif
+
+  // Reset the flag to 0 afer encoding.
+  cpi->rc.use_external_qp_one_pass = 0;
 
   if (result == -1) {
     cm->error->setjmp = 0;

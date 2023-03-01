@@ -36,12 +36,19 @@ struct TplUnitDepStats {
   std::array<int, kBlockRefCount> ref_frame_index;
 };
 
+enum class TplPropagationMode {
+  kRdCost,    // use rd cost for propagation
+  kPredError  // use prediction error for propagation
+};
+
 struct TplFrameDepStats {
   int unit_size;      // equivalent to min_block_size
   double rdcost;      // overall rate-distortion cost
   double alt_rdcost;  // rate-distortion cost in the second tpl pass
+  TplPropagationMode propagation_mode;
   std::vector<std::vector<TplUnitDepStats>> unit_stats;
   std::vector<std::vector<TplUnitDepStats>> alt_unit_stats;
+  std::vector<int> ref_frame_indices;
 };
 
 struct TplGopDepStats {
@@ -60,8 +67,9 @@ GopFrame GopFrameBasic(int global_coding_idx_offset,
                        GopFrameType gop_frame_type);
 
 GopStruct ConstructGop(RefFrameManager *ref_frame_manager, int show_frame_count,
-                       bool has_key_frame, int global_coding_idx_offset,
-                       int global_order_idx_offset);
+                       bool has_key_frame, bool has_arf_frame,
+                       bool use_prev_arf, int global_coding_idx_offset,
+                       int global_order_idx_offset, double base_q_ratio);
 
 // Creates a TplFrameDepStats containing an 2D array of default-initialized
 // TplUnitDepStats, with dimensions of
@@ -73,11 +81,8 @@ TplFrameDepStats CreateTplFrameDepStats(int frame_height, int frame_width,
                                         int min_block_size, bool has_alt_stats);
 
 TplUnitDepStats TplBlockStatsToDepStats(const TplBlockStats &block_stats,
-                                        int unit_count, bool rate_dist_present);
-
-Status FillTplUnitDepStats(TplFrameDepStats &frame_dep_stats,
-                           const TplFrameStats &frame_stats,
-                           const std::vector<TplBlockStats> &block_stats_list);
+                                        int unit_count,
+                                        TplPropagationMode propagation_mode);
 
 StatusOr<TplFrameDepStats> CreateTplFrameDepStatsWithoutPropagation(
     const TplFrameStats &frame_stats);

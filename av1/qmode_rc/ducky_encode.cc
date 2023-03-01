@@ -528,10 +528,10 @@ TplGopStats DuckyEncode::ObtainTplStats(const GopStruct gop_struct,
           if (tpl_stats_ptr->ref_frame_index[i] >= 0) {
             block_stats.ref_frame_index[i] =
                 ref_frame_index_mapping[tpl_stats_ptr->ref_frame_index[i] + 1];
-            block_stats.mv[i] = {
-              tpl_stats_ptr->mv[tpl_stats_ptr->ref_frame_index[i]].as_mv.row,
-              tpl_stats_ptr->mv[tpl_stats_ptr->ref_frame_index[i]].as_mv.col, 3
-            };
+            const auto &mv =
+                tpl_stats_ptr->mv[tpl_stats_ptr->ref_frame_index[i]].as_mv;
+            block_stats.mv[i] = { static_cast<int16_t>(GET_MV_RAWPEL(mv.row)),
+                                  static_cast<int16_t>(GET_MV_RAWPEL(mv.col)) };
           }
         }
         tpl_frame_stats.block_stats_list.push_back(block_stats);
@@ -575,7 +575,7 @@ std::vector<TplGopStats> DuckyEncode::ComputeTplStats(
       write_temp_delimiter_ = ppi->cpi->common.show_frame;
     }
     // The rate_dist_present needs to be populated.
-    tpl_gop_stats = ObtainTplStats(gop_struct, 0);
+    tpl_gop_stats = ObtainTplStats(gop_struct, true);
     tpl_gop_stats_list.push_back(tpl_gop_stats);
   }
   EndEncode();

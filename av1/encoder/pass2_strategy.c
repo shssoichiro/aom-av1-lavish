@@ -17,6 +17,7 @@
  */
 /*! @} - end defgroup gf_group_algo */
 
+#include <assert.h>
 #include <stdint.h>
 
 #include "aom_mem/aom_mem.h"
@@ -939,6 +940,7 @@ static void allocate_gf_group_bits(GF_GROUP *gf_group,
   // Allocate extra bits to each ARF layer
   int i;
   int layer_extra_bits[MAX_ARF_LAYERS + 1] = { 0 };
+  assert(max_arf_layer <= MAX_ARF_LAYERS);
   for (i = 1; i <= max_arf_layer; ++i) {
     double fraction = (i == max_arf_layer) ? 1.0 : layer_fraction[i];
     layer_extra_bits[i] =
@@ -3674,6 +3676,10 @@ void av1_get_second_pass_params(AV1_COMP *cpi,
     frame_params->show_frame =
         !(gf_group->update_type[cpi->gf_frame_index] == ARF_UPDATE ||
           gf_group->update_type[cpi->gf_frame_index] == INTNL_ARF_UPDATE);
+    if (cpi->gf_frame_index == 0) {
+      av1_tf_info_reset(&cpi->ppi->tf_info);
+      av1_tf_info_filtering(&cpi->ppi->tf_info, cpi, gf_group);
+    }
     return;
   }
 
@@ -3714,17 +3720,6 @@ void av1_get_second_pass_params(AV1_COMP *cpi,
 
   if (oxcf->rc_cfg.mode == AOM_Q)
     rc->active_worst_quality = oxcf->rc_cfg.cq_level;
-  FIRSTPASS_STATS this_frame;
-  av1_zero(this_frame);
-  // call above fn
-  if (is_stat_consumption_stage(cpi)) {
-    if (cpi->gf_frame_index < gf_group->size || rc->frames_to_key == 0) {
-      process_first_pass_stats(cpi, &this_frame);
-      update_total_stats = 1;
-    }
-  } else {
-    rc->active_worst_quality = oxcf->rc_cfg.cq_level;
-  }
 
   if (cpi->gf_frame_index == gf_group->size) {
     if (cpi->ppi->lap_enabled && cpi->ppi->p_rc.enable_scenecut_detection) {
@@ -3735,6 +3730,18 @@ void av1_get_second_pass_params(AV1_COMP *cpi,
       if (frames_to_key != -1)
         rc->frames_to_key = AOMMIN(rc->frames_to_key, frames_to_key);
     }
+  }
+
+  FIRSTPASS_STATS this_frame;
+  av1_zero(this_frame);
+  // call above fn
+  if (is_stat_consumption_stage(cpi)) {
+    if (cpi->gf_frame_index < gf_group->size || rc->frames_to_key == 0) {
+      process_first_pass_stats(cpi, &this_frame);
+      update_total_stats = 1;
+    }
+  } else {
+    rc->active_worst_quality = oxcf->rc_cfg.cq_level;
   }
 
   // Keyframe and section processing.

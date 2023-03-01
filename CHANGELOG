@@ -1,4 +1,4 @@
-2023-01-12 v3.6.0
+2023-02-03 v3.6.0
   This release includes compression efficiency and perceptual quality
   improvements, speedup and memory optimizations, and some new features.
   This release is ABI compatible with the last release.
@@ -17,8 +17,10 @@
     * Make SVC work for screen content.
     * Rate control improvements to reduce frame-size spikes for screen
       content coding.
+    * RISC-V architecture support with gcc toolchain.
 
   - Compression Efficiency Improvements
+    * Peak compression efficiency in VOD setting is improved by 1%.
     * 0.7% - 2.2% RTC encoding BDrate gains for real time speed 8 to 10.
     * 15% RTC encoding BDrate gains for screen content speed 10.
 
@@ -41,8 +43,6 @@
         resolutions).
     * ~5% reduction in heap memory requirements for RTC, speed 6 to 10.
     * AVIF:
-      o Support multi-threading for deltaq-mode = 3, --allintra mode, 2x
-        faster than before.
       o 4-5% speedup for speed 9 in still-picture encoding mode.
       o 3-4% heap memory reduction in still-picture encoding mode for
         360p-720p resolutions with multiple threads.
@@ -50,9 +50,20 @@
   - Bug Fixes
     * Added a workaround for an AV1 specification bug which makes
       TRANSLATION type global motion models unusable.
+    * Fixed AddressSanitizer global-buffer-overflow errors in
+      av1/encoder/arm/neon/av1_fwd_txfm2d_neon.c.
+    * Fixed AddressSanitizer heap-buffer-overflow error in
+      av1_wiener_convolve_add_src_neon().
     * chromium:1393384 Avoid scene detection on spatial resize.
     * aomedia:3308 Remove color artifacts under high motion.
+    * aomedia:3310 Avoid out of memory failures with Visual Studio 2017,
+      2019, and 2022 for Win32 x86 builds.
     * aomedia:3346 Make SVC work properly for screen content.
+    * aomedia:3348 Fix a bug where an uninitialized search_site is used.
+    * aomedia:3365 Work around what seems like a Visual Studio 2022
+      compiler optimization bug.
+    * aomedia:3369 Incorrect PSNR values reported by libaom for 12-bit
+      encode.
 
 2022-08-31 v3.5.0
   This release is ABI compatible with the last one, including speedup and memory

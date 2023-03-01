@@ -53,6 +53,7 @@ static const struct arg_enum_list tuning_enum[] = {
   { "experimental", AOM_TUNE_EXPERIMENTAL },
   { "omni", AOM_TUNE_OMNI },
   { "ipq", AOM_TUNE_IMAGE_PERCEPTUAL_QUALITY },
+  { "vmaf_sm", AOM_TUNE_VMAF_SALIENCY_MAP },
   { "ipq_vmaf_psy", AOM_TUNE_IMAGE_PERCEPTUAL_QUALITY_VMAF_PSY_QP }, // Tunes at this point and after use VMAF Q Adjustment
   { "vmaf_psy_qp", AOM_TUNE_FAST_VMAF_PSY_QP },
   { NULL, 0 }
@@ -515,6 +516,16 @@ const av1_codec_arg_definitions_t g_av1_codec_arg_defs = {
 #endif
   .partition_info_path = ARG_DEF(NULL, "partition-info-path", 1,
                                  "Partition information read and write path"),
+  .enable_rate_guide_deltaq =
+      ARG_DEF(NULL, "enable-rate-guide-deltaq", 1,
+              "Enable rate guide deltaq (1), by default off (0). "
+              "It requires --deltaq-mode=3. "
+              "If turned on, it requires an input file specified "
+              "by --rate-distribution-info."),
+  .rate_distribution_info =
+      ARG_DEF(NULL, "rate-distribution-info", 1,
+              "Rate distribution information input."
+              "It requires --enable-rate-guide-deltaq=1."),
   .film_grain_test = ARG_DEF(
       NULL, "film-grain-test", 1,
       "Film grain test vectors (0: none (default), 1: test-1  2: test-2, "
