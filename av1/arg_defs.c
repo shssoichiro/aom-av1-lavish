@@ -53,7 +53,7 @@ static const struct arg_enum_list tuning_enum[] = {
   { "experimental", AOM_TUNE_EXPERIMENTAL },
   { "omni", AOM_TUNE_OMNI },
   { "ipq", AOM_TUNE_IMAGE_PERCEPTUAL_QUALITY },
-  { "vmaf_sm", AOM_TUNE_VMAF_SALIENCY_MAP },
+  { "vmaf_saliency_map", AOM_TUNE_VMAF_SALIENCY_MAP },
   { "ipq_vmaf_psy", AOM_TUNE_IMAGE_PERCEPTUAL_QUALITY_VMAF_PSY_QP }, // Tunes at this point and after use VMAF Q Adjustment
   { "vmaf_psy_qp", AOM_TUNE_FAST_VMAF_PSY_QP },
   { NULL, 0 }
