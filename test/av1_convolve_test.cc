@@ -427,6 +427,16 @@ INSTANTIATE_TEST_SUITE_P(NEON, AV1ConvolveXTest,
                          BuildLowbdParams(av1_convolve_x_sr_neon));
 #endif
 
+#if HAVE_NEON_DOTPROD
+INSTANTIATE_TEST_SUITE_P(NEON_DOTPROD, AV1ConvolveXTest,
+                         BuildLowbdParams(av1_convolve_x_sr_neon_dotprod));
+#endif
+
+#if HAVE_NEON_I8MM
+INSTANTIATE_TEST_SUITE_P(NEON_I8MM, AV1ConvolveXTest,
+                         BuildLowbdParams(av1_convolve_x_sr_neon_i8mm));
+#endif
+
 #if CONFIG_AV1_HIGHBITDEPTH
 /////////////////////////////////////////////////////////
 // Single reference convolve-x functions (high bit-depth)
@@ -533,6 +543,11 @@ INSTANTIATE_TEST_SUITE_P(SSSE3, AV1ConvolveXHighbdTest,
 #if HAVE_AVX2
 INSTANTIATE_TEST_SUITE_P(AVX2, AV1ConvolveXHighbdTest,
                          BuildHighbdParams(av1_highbd_convolve_x_sr_avx2));
+#endif
+
+#if HAVE_NEON
+INSTANTIATE_TEST_SUITE_P(NEON, AV1ConvolveXHighbdTest,
+                         BuildHighbdParams(av1_highbd_convolve_x_sr_neon));
 #endif
 
 #endif  // CONFIG_AV1_HIGHBITDEPTH
@@ -735,6 +750,11 @@ INSTANTIATE_TEST_SUITE_P(AVX2, AV1ConvolveYHighbdTest,
                          BuildHighbdParams(av1_highbd_convolve_y_sr_avx2));
 #endif
 
+#if HAVE_NEON
+INSTANTIATE_TEST_SUITE_P(NEON, AV1ConvolveYHighbdTest,
+                         BuildHighbdParams(av1_highbd_convolve_y_sr_neon));
+#endif
+
 #endif  // CONFIG_AV1_HIGHBITDEPTH
 
 //////////////////////////////////////////////////////////////
@@ -818,6 +838,11 @@ INSTANTIATE_TEST_SUITE_P(SSE2, AV1ConvolveCopyHighbdTest,
 #if HAVE_AVX2
 INSTANTIATE_TEST_SUITE_P(AVX2, AV1ConvolveCopyHighbdTest,
                          BuildHighbdParams(aom_highbd_convolve_copy_avx2));
+#endif
+
+#if HAVE_NEON
+INSTANTIATE_TEST_SUITE_P(NEON, AV1ConvolveCopyHighbdTest,
+                         BuildHighbdParams(aom_highbd_convolve_copy_neon));
 #endif
 
 #endif  // CONFIG_AV1_HIGHBITDEPTH
@@ -948,6 +973,16 @@ INSTANTIATE_TEST_SUITE_P(NEON, AV1Convolve2DTest,
                          BuildLowbdParams(av1_convolve_2d_sr_neon));
 #endif
 
+#if HAVE_NEON_DOTPROD
+INSTANTIATE_TEST_SUITE_P(NEON_DOTPROD, AV1Convolve2DTest,
+                         BuildLowbdParams(av1_convolve_2d_sr_neon_dotprod));
+#endif
+
+#if HAVE_NEON_I8MM
+INSTANTIATE_TEST_SUITE_P(NEON_I8MM, AV1Convolve2DTest,
+                         BuildLowbdParams(av1_convolve_2d_sr_neon_i8mm));
+#endif
+
 #if CONFIG_AV1_HIGHBITDEPTH
 //////////////////////////////////////////////////////////
 // Single reference convolve-2d functions (high bit-depth)
@@ -1070,6 +1105,11 @@ INSTANTIATE_TEST_SUITE_P(SSSE3, AV1Convolve2DHighbdTest,
 #if HAVE_AVX2
 INSTANTIATE_TEST_SUITE_P(AVX2, AV1Convolve2DHighbdTest,
                          BuildHighbdParams(av1_highbd_convolve_2d_sr_avx2));
+#endif
+
+#if HAVE_NEON
+INSTANTIATE_TEST_SUITE_P(NEON, AV1Convolve2DHighbdTest,
+                         BuildHighbdParams(av1_highbd_convolve_2d_sr_neon));
 #endif
 
 #endif  // CONFIG_AV1_HIGHBITDEPTH
@@ -1289,6 +1329,18 @@ INSTANTIATE_TEST_SUITE_P(NEON, AV1ConvolveXCompoundTest,
                          BuildLowbdLumaParams(av1_dist_wtd_convolve_x_neon));
 #endif
 
+#if HAVE_NEON_DOTPROD
+INSTANTIATE_TEST_SUITE_P(
+    NEON_DOTPROD, AV1ConvolveXCompoundTest,
+    BuildLowbdLumaParams(av1_dist_wtd_convolve_x_neon_dotprod));
+#endif
+
+#if HAVE_NEON_I8MM
+INSTANTIATE_TEST_SUITE_P(
+    NEON_I8MM, AV1ConvolveXCompoundTest,
+    BuildLowbdLumaParams(av1_dist_wtd_convolve_x_neon_i8mm));
+#endif
+
 #if CONFIG_AV1_HIGHBITDEPTH
 /////////////////////////////////////////////////
 // Compound convolve-x functions (high bit-depth)
@@ -1377,6 +1429,12 @@ INSTANTIATE_TEST_SUITE_P(
     BuildHighbdLumaParams(av1_highbd_dist_wtd_convolve_x_avx2));
 #endif
 
+#if HAVE_NEON
+INSTANTIATE_TEST_SUITE_P(
+    NEON, AV1ConvolveXHighbdCompoundTest,
+    BuildHighbdLumaParams(av1_highbd_dist_wtd_convolve_x_neon));
+#endif
+
 #endif  // CONFIG_AV1_HIGHBITDEPTH
 
 ////////////////////////////////////////////////
@@ -1449,6 +1507,12 @@ INSTANTIATE_TEST_SUITE_P(
 INSTANTIATE_TEST_SUITE_P(
     AVX2, AV1ConvolveYHighbdCompoundTest,
     BuildHighbdLumaParams(av1_highbd_dist_wtd_convolve_y_avx2));
+#endif
+
+#if HAVE_NEON
+INSTANTIATE_TEST_SUITE_P(
+    NEON, AV1ConvolveYHighbdCompoundTest,
+    BuildHighbdLumaParams(av1_highbd_dist_wtd_convolve_y_neon));
 #endif
 
 #endif  // CONFIG_AV1_HIGHBITDEPTH
@@ -1655,6 +1719,12 @@ INSTANTIATE_TEST_SUITE_P(
     BuildHighbdLumaParams(av1_highbd_dist_wtd_convolve_2d_copy_avx2));
 #endif
 
+#if HAVE_NEON
+INSTANTIATE_TEST_SUITE_P(
+    NEON, AV1Convolve2DCopyHighbdCompoundTest,
+    BuildHighbdLumaParams(av1_highbd_dist_wtd_convolve_2d_copy_neon));
+#endif
+
 #endif  // CONFIG_AV1_HIGHBITDEPTH
 
 /////////////////////////////////////////////////
@@ -1754,6 +1824,18 @@ INSTANTIATE_TEST_SUITE_P(NEON, AV1Convolve2DCompoundTest,
                          BuildLowbdLumaParams(av1_dist_wtd_convolve_2d_neon));
 #endif
 
+#if HAVE_NEON_DOTPROD
+INSTANTIATE_TEST_SUITE_P(
+    NEON_DOTPROD, AV1Convolve2DCompoundTest,
+    BuildLowbdLumaParams(av1_dist_wtd_convolve_2d_neon_dotprod));
+#endif
+
+#if HAVE_NEON_I8MM
+INSTANTIATE_TEST_SUITE_P(
+    NEON_I8MM, AV1Convolve2DCompoundTest,
+    BuildLowbdLumaParams(av1_dist_wtd_convolve_2d_neon_i8mm));
+#endif
+
 #if CONFIG_AV1_HIGHBITDEPTH
 //////////////////////////////////////////////////
 // Compound convolve-2d functions (high bit-depth)
@@ -1844,6 +1926,12 @@ INSTANTIATE_TEST_SUITE_P(
 INSTANTIATE_TEST_SUITE_P(
     AVX2, AV1Convolve2DHighbdCompoundTest,
     BuildHighbdLumaParams(av1_highbd_dist_wtd_convolve_2d_avx2));
+#endif
+
+#if HAVE_NEON
+INSTANTIATE_TEST_SUITE_P(
+    NEON, AV1Convolve2DHighbdCompoundTest,
+    BuildHighbdLumaParams(av1_highbd_dist_wtd_convolve_2d_neon));
 #endif
 
 #endif  // CONFIG_AV1_HIGHBITDEPTH

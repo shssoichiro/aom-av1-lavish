@@ -521,7 +521,12 @@ static void process_tpl_stats_frame(AV1_COMP *cpi) {
               cpi->ppi->p_rc.gfu_boost, gfu_boost,
               cpi->ppi->p_rc.num_stats_used_for_gfu_boost);
         } else {
-          const int gfu_boost = (int)(200.0 / cpi->rd.r0);
+          // TPL may only look at a subset of frame in the gf group when the
+          // speed feature 'reduce_num_frames' is on, which affects the r0
+          // calcuation. Thus, to compensate for TPL not using all frames a
+          // factor to adjust r0 is used.
+          const int gfu_boost =
+              (int)(200.0 * cpi->ppi->tpl_data.r0_adjust_factor / cpi->rd.r0);
           cpi->ppi->p_rc.gfu_boost = combine_prior_with_tpl_boost(
               MIN_BOOST_COMBINE_FACTOR, MAX_BOOST_COMBINE_FACTOR,
               cpi->ppi->p_rc.gfu_boost, gfu_boost, cpi->rc.frames_to_key);
@@ -682,6 +687,17 @@ void av1_scale_references(AV1_COMP *cpi, const InterpFilter filter,
       if (ref == NULL) {
         cpi->scaled_ref_buf[ref_frame - 1] = NULL;
         continue;
+      }
+
+      // For RTC-SVC: if force_zero_mode_spatial_ref is enabled, check if the
+      // motion search can be skipped for the references: last, golden, altref.
+      // If so, we can skip scaling that reference.
+      if (cpi->ppi->use_svc && cpi->svc.force_zero_mode_spatial_ref &&
+          cpi->ppi->rtc_ref.set_ref_frame_config) {
+        if (ref_frame == LAST_FRAME && cpi->svc.skip_mvsearch_last) continue;
+        if (ref_frame == GOLDEN_FRAME && cpi->svc.skip_mvsearch_gf) continue;
+        if (ref_frame == ALTREF_FRAME && cpi->svc.skip_mvsearch_altref)
+          continue;
       }
 
       if (ref->y_crop_width != cm->width || ref->y_crop_height != cm->height) {
@@ -870,7 +886,7 @@ void av1_setup_frame(AV1_COMP *cpi) {
     if (!cpi->ppi->seq_params_locked) {
       set_sb_size(cm->seq_params,
                   av1_select_sb_size(&cpi->oxcf, cm->width, cm->height,
-                                     cpi->svc.number_spatial_layers));
+                                     cpi->ppi->number_spatial_layers));
     }
   } else {
     const RefCntBuffer *const primary_ref_buf = get_primary_ref_frame_buf(cm);
@@ -971,7 +987,13 @@ static void screen_content_tools_determination(
   if (pass != 1) return;
 
   const double psnr_diff = psnr[1].psnr[0] - psnr[0].psnr[0];
-  const int is_sc_encoding_much_better = psnr_diff > STRICT_PSNR_DIFF_THRESH;
+  // Calculate % of palette mode to be chosen in a frame from mode decision.
+  const double palette_ratio =
+      (double)cpi->palette_pixel_num / (double)(cm->height * cm->width);
+  const int psnr_diff_is_large = (psnr_diff > STRICT_PSNR_DIFF_THRESH);
+  const int ratio_is_large =
+      ((palette_ratio >= 0.0001) && ((psnr_diff / palette_ratio) > 4));
+  const int is_sc_encoding_much_better = (psnr_diff_is_large || ratio_is_large);
   if (is_sc_encoding_much_better) {
     // Use screen content tools, if we get coding gain.
     features->allow_screen_content_tools = 1;

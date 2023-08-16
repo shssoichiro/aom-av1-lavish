@@ -46,10 +46,10 @@ typedef std::tuple<av1_calc_indices_dim2_func, BLOCK_SIZE>
 class AV1KmeansTest1
     : public ::testing::TestWithParam<av1_calc_indices_dim1Param> {
  public:
-  ~AV1KmeansTest1();
-  void SetUp();
+  ~AV1KmeansTest1() override;
+  void SetUp() override;
 
-  void TearDown();
+  void TearDown() override;
 
  protected:
   void RunCheckOutput(av1_calc_indices_dim1_func test_impl, BLOCK_SIZE bsize,
@@ -75,7 +75,7 @@ class AV1KmeansTest1
 };
 GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(AV1KmeansTest1);
 
-AV1KmeansTest1::~AV1KmeansTest1() {}
+AV1KmeansTest1::~AV1KmeansTest1() = default;
 
 void AV1KmeansTest1::SetUp() {
   rnd_.Reset(libaom_test::ACMRandom::DeterministicSeed());
@@ -152,10 +152,10 @@ TEST_P(AV1KmeansTest1, DISABLED_Speed) {
 class AV1KmeansTest2
     : public ::testing::TestWithParam<av1_calc_indices_dim2Param> {
  public:
-  ~AV1KmeansTest2();
-  void SetUp();
+  ~AV1KmeansTest2() override;
+  void SetUp() override;
 
-  void TearDown();
+  void TearDown() override;
 
  protected:
   void RunCheckOutput(av1_calc_indices_dim2_func test_impl, BLOCK_SIZE bsize,
@@ -185,7 +185,7 @@ class AV1KmeansTest2
 };
 GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(AV1KmeansTest2);
 
-AV1KmeansTest2::~AV1KmeansTest2() {}
+AV1KmeansTest2::~AV1KmeansTest2() = default;
 
 void AV1KmeansTest2::SetUp() {
   rnd_.Reset(libaom_test::ACMRandom::DeterministicSeed());
@@ -259,12 +259,23 @@ TEST_P(AV1KmeansTest2, DISABLED_Speed) {
   RunSpeedTest(GET_PARAM(0), GET_PARAM(1), 8);
 }
 
-#if HAVE_AVX2 || HAVE_SSE2
+#if HAVE_SSE2 || HAVE_AVX2 || HAVE_NEON
 const BLOCK_SIZE kValidBlockSize[] = { BLOCK_8X8,   BLOCK_8X16,  BLOCK_8X32,
                                        BLOCK_16X8,  BLOCK_16X16, BLOCK_16X32,
                                        BLOCK_32X8,  BLOCK_32X16, BLOCK_32X32,
                                        BLOCK_32X64, BLOCK_64X32, BLOCK_64X64,
                                        BLOCK_16X64, BLOCK_64X16 };
+#endif
+
+#if HAVE_SSE2
+INSTANTIATE_TEST_SUITE_P(
+    SSE2, AV1KmeansTest1,
+    ::testing::Combine(::testing::Values(&av1_calc_indices_dim1_sse2),
+                       ::testing::ValuesIn(kValidBlockSize)));
+INSTANTIATE_TEST_SUITE_P(
+    SSE2, AV1KmeansTest2,
+    ::testing::Combine(::testing::Values(&av1_calc_indices_dim2_sse2),
+                       ::testing::ValuesIn(kValidBlockSize)));
 #endif
 
 #if HAVE_AVX2
@@ -278,15 +289,14 @@ INSTANTIATE_TEST_SUITE_P(
                        ::testing::ValuesIn(kValidBlockSize)));
 #endif
 
-#if HAVE_SSE2
-
+#if HAVE_NEON
 INSTANTIATE_TEST_SUITE_P(
-    SSE2, AV1KmeansTest1,
-    ::testing::Combine(::testing::Values(&av1_calc_indices_dim1_sse2),
+    NEON, AV1KmeansTest1,
+    ::testing::Combine(::testing::Values(&av1_calc_indices_dim1_neon),
                        ::testing::ValuesIn(kValidBlockSize)));
 INSTANTIATE_TEST_SUITE_P(
-    SSE2, AV1KmeansTest2,
-    ::testing::Combine(::testing::Values(&av1_calc_indices_dim2_sse2),
+    NEON, AV1KmeansTest2,
+    ::testing::Combine(::testing::Values(&av1_calc_indices_dim2_neon),
                        ::testing::ValuesIn(kValidBlockSize)));
 #endif
 

@@ -21,8 +21,16 @@ set(AOM_UNIT_TEST_DATA_LIST_FILE "${AOM_ROOT}/test/test-data.sha1")
 set(AOM_IDE_TEST_FOLDER "test")
 set(AOM_IDE_TESTDATA_FOLDER "testdata")
 
+# Appends |AOM_TEST_SOURCE_VARS| with |src_list_name| at the caller's scope.
+# This collects all variables containing libaom test source files.
+function(add_to_libaom_test_srcs src_list_name)
+  list(APPEND AOM_TEST_SOURCE_VARS ${src_list_name})
+  set(AOM_TEST_SOURCE_VARS "${AOM_TEST_SOURCE_VARS}" PARENT_SCOPE)
+endfunction()
+
 list(APPEND AOM_UNIT_TEST_WRAPPER_SOURCES "${AOM_GEN_SRC_DIR}/usage_exit.c"
             "${AOM_ROOT}/test/test_libaom.cc")
+add_to_libaom_test_srcs(AOM_UNIT_TEST_WRAPPER_SOURCES)
 
 list(APPEND AOM_UNIT_TEST_COMMON_SOURCES
             "${AOM_ROOT}/test/acm_random.h"
@@ -41,6 +49,7 @@ list(APPEND AOM_UNIT_TEST_COMMON_SOURCES
             "${AOM_ROOT}/test/transform_test_base.h"
             "${AOM_ROOT}/test/util.h"
             "${AOM_ROOT}/test/video_source.h")
+add_to_libaom_test_srcs(AOM_UNIT_TEST_COMMON_SOURCES)
 
 list(APPEND AOM_UNIT_TEST_DECODER_SOURCES "${AOM_ROOT}/test/decode_api_test.cc"
             "${AOM_ROOT}/test/decode_scalability_test.cc"
@@ -48,6 +57,7 @@ list(APPEND AOM_UNIT_TEST_DECODER_SOURCES "${AOM_ROOT}/test/decode_api_test.cc"
             "${AOM_ROOT}/test/invalid_file_test.cc"
             "${AOM_ROOT}/test/test_vector_test.cc"
             "${AOM_ROOT}/test/ivf_video_source.h")
+add_to_libaom_test_srcs(AOM_UNIT_TEST_DECODER_SOURCES)
 
 list(APPEND AOM_UNIT_TEST_ENCODER_SOURCES
             "${AOM_ROOT}/test/active_map_test.cc"
@@ -60,6 +70,7 @@ list(APPEND AOM_UNIT_TEST_ENCODER_SOURCES
             "${AOM_ROOT}/test/datarate_test.cc"
             "${AOM_ROOT}/test/datarate_test.h"
             "${AOM_ROOT}/test/deltaq_mode_test.cc"
+            "${AOM_ROOT}/test/dropframe_encode_test.cc"
             "${AOM_ROOT}/test/svc_datarate_test.cc"
             "${AOM_ROOT}/test/encode_api_test.cc"
             "${AOM_ROOT}/test/encode_small_width_height_test.cc"
@@ -86,9 +97,11 @@ list(APPEND AOM_UNIT_TEST_ENCODER_SOURCES
             "${AOM_ROOT}/test/y4m_video_source.h"
             "${AOM_ROOT}/test/yuv_video_source.h"
             "${AOM_ROOT}/test/time_stamp_test.cc")
+add_to_libaom_test_srcs(AOM_UNIT_TEST_ENCODER_SOURCES)
 
 list(APPEND AOM_ENCODE_PERF_TEST_SOURCES "${AOM_ROOT}/test/encode_perf_test.cc")
 list(APPEND AOM_UNIT_TEST_WEBM_SOURCES "${AOM_ROOT}/test/webm_video_source.h")
+add_to_libaom_test_srcs(AOM_UNIT_TEST_WEBM_SOURCES)
 list(APPEND AOM_TEST_INTRA_PRED_SPEED_SOURCES "${AOM_GEN_SRC_DIR}/usage_exit.c"
             "${AOM_ROOT}/test/test_intra_pred_speed.cc")
 
@@ -114,6 +127,7 @@ if(CONFIG_REALTIME_ONLY)
                    "${AOM_ROOT}/test/cpu_speed_test.cc"
                    "${AOM_ROOT}/test/cpu_used_firstpass_test.cc"
                    "${AOM_ROOT}/test/deltaq_mode_test.cc"
+                   "${AOM_ROOT}/test/dropframe_encode_test.cc"
                    "${AOM_ROOT}/test/end_to_end_psnr_test.cc"
                    "${AOM_ROOT}/test/force_key_frame_test.cc"
                    "${AOM_ROOT}/test/gf_pyr_height_test.cc"
@@ -145,15 +159,19 @@ if(NOT BUILD_SHARED_LIBS)
 
   list(APPEND AOM_UNIT_TEST_COMMON_INTRIN_NEON
               "${AOM_ROOT}/test/simd_cmp_neon.cc")
+  add_to_libaom_test_srcs(AOM_UNIT_TEST_COMMON_INTRIN_NEON)
 
   list(APPEND AOM_UNIT_TEST_COMMON_INTRIN_SSE2
               "${AOM_ROOT}/test/simd_cmp_sse2.cc")
+  add_to_libaom_test_srcs(AOM_UNIT_TEST_COMMON_INTRIN_SSE2)
 
   list(APPEND AOM_UNIT_TEST_COMMON_INTRIN_SSSE3
               "${AOM_ROOT}/test/simd_cmp_ssse3.cc")
+  add_to_libaom_test_srcs(AOM_UNIT_TEST_COMMON_INTRIN_SSSE3)
 
   list(APPEND AOM_UNIT_TEST_COMMON_INTRIN_AVX2
               "${AOM_ROOT}/test/simd_cmp_avx2.cc")
+  add_to_libaom_test_srcs(AOM_UNIT_TEST_COMMON_INTRIN_AVX2)
 
   list(APPEND AOM_UNIT_TEST_ENCODER_SOURCES
               "${AOM_ROOT}/test/arf_freq_test.cc"
@@ -162,6 +180,7 @@ if(NOT BUILD_SHARED_LIBS)
               "${AOM_ROOT}/test/av1_fwd_txfm2d_test.cc"
               "${AOM_ROOT}/test/av1_inv_txfm1d_test.cc"
               "${AOM_ROOT}/test/av1_inv_txfm2d_test.cc"
+              "${AOM_ROOT}/test/av1_k_means_test.cc"
               "${AOM_ROOT}/test/av1_nn_predict_test.cc"
               "${AOM_ROOT}/test/av1_round_shift_array_test.cc"
               "${AOM_ROOT}/test/av1_softmax_test.cc"
@@ -173,42 +192,49 @@ if(NOT BUILD_SHARED_LIBS)
               "${AOM_ROOT}/test/blend_a64_mask_test.cc"
               "${AOM_ROOT}/test/comp_avg_pred_test.cc"
               "${AOM_ROOT}/test/comp_avg_pred_test.h"
-              "${AOM_ROOT}/test/comp_mask_variance_test.cc"
+              "${AOM_ROOT}/test/comp_mask_pred_test.cc"
+              "${AOM_ROOT}/test/disflow_test.cc"
               "${AOM_ROOT}/test/encodemb_test.cc"
               "${AOM_ROOT}/test/encodetxb_test.cc"
               "${AOM_ROOT}/test/end_to_end_qmpsnr_test.cc"
               "${AOM_ROOT}/test/end_to_end_ssim_test.cc"
               "${AOM_ROOT}/test/error_block_test.cc"
+              "${AOM_ROOT}/test/fdct4x4_test.cc"
               "${AOM_ROOT}/test/fft_test.cc"
               "${AOM_ROOT}/test/firstpass_test.cc"
+              "${AOM_ROOT}/test/frame_error_test.cc"
               "${AOM_ROOT}/test/fwht4x4_test.cc"
-              "${AOM_ROOT}/test/fdct4x4_test.cc"
               "${AOM_ROOT}/test/hadamard_test.cc"
               "${AOM_ROOT}/test/horver_correlation_test.cc"
               "${AOM_ROOT}/test/masked_sad_test.cc"
               "${AOM_ROOT}/test/masked_variance_test.cc"
+              "${AOM_ROOT}/test/minmax_test.cc"
               "${AOM_ROOT}/test/motion_vector_test.cc"
               "${AOM_ROOT}/test/mv_cost_test.cc"
               "${AOM_ROOT}/test/noise_model_test.cc"
               "${AOM_ROOT}/test/obmc_sad_test.cc"
               "${AOM_ROOT}/test/obmc_variance_test.cc"
               "${AOM_ROOT}/test/pickrst_test.cc"
+              "${AOM_ROOT}/test/reconinter_test.cc"
               "${AOM_ROOT}/test/sad_test.cc"
               "${AOM_ROOT}/test/subtract_test.cc"
-              "${AOM_ROOT}/test/reconinter_test.cc"
               "${AOM_ROOT}/test/sum_squares_test.cc"
               "${AOM_ROOT}/test/sse_sum_test.cc"
               "${AOM_ROOT}/test/variance_test.cc"
-              "${AOM_ROOT}/test/wiener_test.cc"
-              "${AOM_ROOT}/test/frame_error_test.cc"
               "${AOM_ROOT}/test/warp_filter_test.cc"
               "${AOM_ROOT}/test/warp_filter_test_util.cc"
               "${AOM_ROOT}/test/warp_filter_test_util.h"
               "${AOM_ROOT}/test/webmenc_test.cc"
-              "${AOM_ROOT}/test/av1_k_means_test.cc")
+              "${AOM_ROOT}/test/wiener_test.cc")
 
   list(APPEND AOM_UNIT_TEST_ENCODER_INTRIN_SSE4_1
               "${AOM_ROOT}/test/simd_cmp_sse4.cc")
+  add_to_libaom_test_srcs(AOM_UNIT_TEST_ENCODER_INTRIN_SSE4_1)
+
+  if(NOT CONFIG_REALTIME_ONLY)
+    list(APPEND AOM_UNIT_TEST_ENCODER_INTRIN_SSE4_1
+                "${AOM_ROOT}/test/corner_match_test.cc")
+  endif()
 
   if(NOT CONFIG_REALTIME_ONLY)
     list(APPEND AOM_UNIT_TEST_ENCODER_INTRIN_SSE4_1
@@ -334,12 +360,19 @@ if(NOT BUILD_SHARED_LIBS)
 
   endif()
 
+  if(HAVE_NEON)
+    list(APPEND AOM_UNIT_TEST_ENCODER_SOURCES
+                "${AOM_ROOT}/test/av1_convolve_scale_test.cc"
+                "${AOM_ROOT}/test/av1_horz_only_frame_superres_test.cc")
+  endif()
+
   if(HAVE_SSE4_2 OR HAVE_ARM_CRC32)
     list(APPEND AOM_UNIT_TEST_ENCODER_SOURCES "${AOM_ROOT}/test/hash_test.cc")
   endif()
 
   if(CONFIG_REALTIME_ONLY)
     list(REMOVE_ITEM AOM_UNIT_TEST_ENCODER_SOURCES
+                     "${AOM_ROOT}/test/disflow_test.cc"
                      "${AOM_ROOT}/test/end_to_end_qmpsnr_test.cc"
                      "${AOM_ROOT}/test/end_to_end_ssim_test.cc"
                      "${AOM_ROOT}/test/firstpass_test.cc"
@@ -356,21 +389,20 @@ if(NOT BUILD_SHARED_LIBS)
 endif()
 
 if(CONFIG_AV1_ENCODER AND ENABLE_TESTS)
-  list(APPEND AOM_RC_TEST_SOURCES
-              "${AOM_ROOT}/common/tools_common.c"
-              "${AOM_ROOT}/common/tools_common.h"
-              "${AOM_ROOT}/common/y4minput.c"
-              "${AOM_ROOT}/common/y4minput.h"
-              "${AOM_ROOT}/test/codec_factory.h"
+  list(APPEND AOM_RC_TEST_SOURCES "${AOM_ROOT}/test/codec_factory.h"
               "${AOM_ROOT}/test/decode_test_driver.cc"
               "${AOM_ROOT}/test/decode_test_driver.h"
               "${AOM_ROOT}/test/encode_test_driver.cc"
               "${AOM_ROOT}/test/encode_test_driver.h"
+              "${AOM_ROOT}/test/i420_video_source.h"
               "${AOM_ROOT}/test/ratectrl_rtc_test.cc"
-              "${AOM_ROOT}/test/test_aom_rc.cc"
-              "${AOM_ROOT}/test/y4m_video_source.h"
-              "${AOM_ROOT}/test/yuv_video_source.h"
-              "${AOM_GEN_SRC_DIR}/usage_exit.c")
+              "${AOM_ROOT}/test/test_aom_rc.cc" "${AOM_ROOT}/test/util.h")
+  if(CONFIG_THREE_PASS)
+    # Add the dependencies of "${AOM_ROOT}/common/ivfdec.c".
+    list(APPEND AOM_RC_TEST_SOURCES "${AOM_ROOT}/common/tools_common.c"
+                "${AOM_ROOT}/common/tools_common.h"
+                "${AOM_GEN_SRC_DIR}/usage_exit.c")
+  endif()
 endif()
 
 if(ENABLE_TESTS)
@@ -459,23 +491,17 @@ function(setup_aom_test_targets)
       target_sources(test_libaom PRIVATE ${AOM_ENCODE_PERF_TEST_SOURCES})
     endif()
 
-    if(NOT BUILD_SHARED_LIBS)
-      add_executable(test_intra_pred_speed
-                     ${AOM_TEST_INTRA_PRED_SPEED_SOURCES}
-                     $<TARGET_OBJECTS:aom_common_app_util>)
-      set_property(TARGET test_intra_pred_speed
-                   PROPERTY FOLDER ${AOM_IDE_TEST_FOLDER})
-      target_link_libraries(test_intra_pred_speed ${AOM_LIB_LINK_TYPE} aom
-                            aom_gtest)
-      list(APPEND AOM_APP_TARGETS test_intra_pred_speed)
-    endif()
+    add_executable(test_intra_pred_speed ${AOM_TEST_INTRA_PRED_SPEED_SOURCES}
+                                         $<TARGET_OBJECTS:aom_common_app_util>)
+    set_property(TARGET test_intra_pred_speed
+                 PROPERTY FOLDER ${AOM_IDE_TEST_FOLDER})
+    target_link_libraries(test_intra_pred_speed ${AOM_LIB_LINK_TYPE} ${AOM_LIB}
+                          aom_gtest)
+    list(APPEND AOM_APP_TARGETS test_intra_pred_speed)
   endif()
 
-  target_link_libraries(test_libaom ${AOM_LIB_LINK_TYPE} aom aom_gtest)
+  target_link_libraries(test_libaom ${AOM_LIB_LINK_TYPE} ${AOM_LIB} aom_gtest)
 
-  if(CONFIG_LIBYUV)
-    target_sources(test_libaom PRIVATE $<TARGET_OBJECTS:yuv>)
-  endif()
   if(CONFIG_WEBM_IO)
     target_sources(test_libaom PRIVATE $<TARGET_OBJECTS:webm>)
   endif()
@@ -504,10 +530,6 @@ function(setup_aom_test_targets)
   if(HAVE_NEON)
     add_intrinsics_source_to_target("${AOM_NEON_INTRIN_FLAG}" "test_libaom"
                                     "AOM_UNIT_TEST_COMMON_INTRIN_NEON")
-  endif()
-  if(HAVE_ARM_CRC32)
-    add_intrinsics_source_to_target("${AOM_ARM_CRC32_FLAG}" "test_libaom"
-                                    "AOM_UNIT_TEST_COMMON_INTRIN_CRC32")
   endif()
 
   if(ENABLE_TESTDATA)
@@ -570,39 +592,47 @@ function(setup_aom_test_targets)
     endif()
   endif()
 
-  # Collect all variables containing libaom test source files.
-  get_cmake_property(all_cmake_vars VARIABLES)
-  foreach(var ${all_cmake_vars})
-
-    # https://github.com/cheshirekow/cmake_format/issues/34
-    # cmake-format: off
-    if (("${var}" MATCHES "_TEST_" AND NOT
-         "${var}" MATCHES
-         "_DATA_\|_CMAKE_\|INTRA_PRED\|_COMPILED\|_HOSTING\|_PERF_\|CODER_\|_RC_")
-        OR (CONFIG_AV1_ENCODER AND ENABLE_ENCODE_PERF_TESTS AND
-            "${var}" MATCHES "_ENCODE_PERF_TEST_")
-        OR (CONFIG_AV1_DECODER AND ENABLE_DECODE_PERF_TESTS AND
-            "${var}" MATCHES "_DECODE_PERF_TEST_")
-        OR (CONFIG_AV1_ENCODER AND "${var}" MATCHES "_TEST_ENCODER_")
-        OR (CONFIG_AV1_DECODER AND  "${var}" MATCHES "_TEST_DECODER_"))
-      list(APPEND aom_test_source_vars ${var})
-    endif()
-    # cmake-format: on
-  endforeach()
-
   # Libaom_test_srcs.txt generation.
   set(libaom_test_srcs_txt_file "${AOM_CONFIG_DIR}/libaom_test_srcs.txt")
   file(WRITE "${libaom_test_srcs_txt_file}"
        "# This file is generated. DO NOT EDIT.\n")
 
   # Static source file list first.
-  foreach(aom_test_source_var ${aom_test_source_vars})
+  list(SORT AOM_TEST_SOURCE_VARS)
+  foreach(aom_test_source_var ${AOM_TEST_SOURCE_VARS})
+    if("${aom_test_source_var}" STREQUAL "${last_aom_test_source_var}")
+      message(
+        FATAL_ERROR
+          "Duplicate AOM_TEST_SOURCE_VARS entry: ${aom_test_source_var}")
+    endif()
     foreach(file ${${aom_test_source_var}})
       if(NOT "${file}" MATCHES "${AOM_CONFIG_DIR}")
         string(REPLACE "${AOM_ROOT}/" "" file "${file}")
         file(APPEND "${libaom_test_srcs_txt_file}" "${file}\n")
       endif()
     endforeach()
+    set(last_aom_test_source_var ${aom_test_source_var})
+  endforeach()
+
+  # libaom_test_srcs.gni generation
+  set(libaom_test_srcs_gni_file "${AOM_CONFIG_DIR}/libaom_test_srcs.gni")
+  file(WRITE "${libaom_test_srcs_gni_file}"
+       "# This file is generated. DO NOT EDIT.\n")
+
+  foreach(aom_test_source_var ${AOM_TEST_SOURCE_VARS})
+    string(TOLOWER "${aom_test_source_var}" aom_test_source_var_lowercase)
+    file(APPEND "${libaom_test_srcs_gni_file}"
+         "\n${aom_test_source_var_lowercase} = [\n")
+
+    foreach(file ${${aom_test_source_var}})
+      if(NOT "${file}" MATCHES "${AOM_CONFIG_DIR}")
+        string(REPLACE "${AOM_ROOT}/" "//third_party/libaom/source/libaom/" file
+                       "${file}")
+        file(APPEND "${libaom_test_srcs_gni_file}" "  \"${file}\",\n")
+      endif()
+    endforeach()
+
+    file(APPEND "${libaom_test_srcs_gni_file}" "]\n")
   endforeach()
 
   # Set up test for rc interface

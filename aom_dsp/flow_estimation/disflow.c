@@ -154,9 +154,13 @@ static int determine_disflow_correspondence(CornerList *corners,
 // (x, y) in src and the other at (x + u, y + v) in ref.
 // This function returns the sum of squared pixel differences between
 // the two regions.
-static INLINE void compute_flow_error(const uint8_t *ref, const uint8_t *src,
-                                      int width, int height, int stride, int x,
-                                      int y, double u, double v, int16_t *dt) {
+static INLINE void compute_flow_vector(const uint8_t *src, const uint8_t *ref,
+                                       int width, int height, int stride, int x,
+                                       int y, double u, double v,
+                                       const int16_t *dx, const int16_t *dy,
+                                       int *b) {
+  memset(b, 0, 2 * sizeof(*b));
+
   // Split offset into integer and fractional parts, and compute cubic
   // interpolation kernels
   const int u_int = (int)floor(u);
@@ -230,8 +234,9 @@ static INLINE void compute_flow_error(const uint8_t *ref, const uint8_t *src,
       const int round_bits = DISFLOW_INTERP_BITS + 6 - DISFLOW_DERIV_SCALE_LOG2;
       const int warped = ROUND_POWER_OF_TWO(result, round_bits);
       const int src_px = src[(x + j) + (y + i) * stride] << 3;
-      const int err = warped - src_px;
-      dt[i * DISFLOW_PATCH_SIZE + j] = err;
+      const int dt = warped - src_px;
+      b[0] += dx[i * DISFLOW_PATCH_SIZE + j] * dt;
+      b[1] += dy[i * DISFLOW_PATCH_SIZE + j] * dt;
     }
   }
 }
@@ -351,20 +356,6 @@ static INLINE void compute_flow_matrix(const int16_t *dx, int dx_stride,
   M[3] = (double)tmp[3];
 }
 
-static INLINE void compute_flow_vector(const int16_t *dx, int dx_stride,
-                                       const int16_t *dy, int dy_stride,
-                                       const int16_t *dt, int dt_stride,
-                                       int *b) {
-  memset(b, 0, 2 * sizeof(*b));
-
-  for (int i = 0; i < DISFLOW_PATCH_SIZE; i++) {
-    for (int j = 0; j < DISFLOW_PATCH_SIZE; j++) {
-      b[0] += dx[i * dx_stride + j] * dt[i * dt_stride + j];
-      b[1] += dy[i * dy_stride + j] * dt[i * dt_stride + j];
-    }
-  }
-}
-
 // Try to invert the matrix M
 // Note: Due to the nature of how a least-squares matrix is constructed, all of
 // the eigenvalues will be >= 0, and therefore det M >= 0 as well.
@@ -388,11 +379,8 @@ void aom_compute_flow_at_point_c(const uint8_t *src, const uint8_t *ref, int x,
   double M[4];
   double M_inv[4];
   int b[2];
-  int16_t dt[DISFLOW_PATCH_SIZE * DISFLOW_PATCH_SIZE];
   int16_t dx[DISFLOW_PATCH_SIZE * DISFLOW_PATCH_SIZE];
   int16_t dy[DISFLOW_PATCH_SIZE * DISFLOW_PATCH_SIZE];
-  const double o_u = *u;
-  const double o_v = *v;
 
   // Compute gradients within this patch
   const uint8_t *src_patch = &src[y * stride + x];
@@ -403,26 +391,20 @@ void aom_compute_flow_at_point_c(const uint8_t *src, const uint8_t *ref, int x,
   invert_2x2(M, M_inv);
 
   for (int itr = 0; itr < DISFLOW_MAX_ITR; itr++) {
-    compute_flow_error(ref, src, width, height, stride, x, y, *u, *v, dt);
-    compute_flow_vector(dx, DISFLOW_PATCH_SIZE, dy, DISFLOW_PATCH_SIZE, dt,
-                        DISFLOW_PATCH_SIZE, b);
+    compute_flow_vector(src, ref, width, height, stride, x, y, *u, *v, dx, dy,
+                        b);
 
     // Solve flow equations to find a better estimate for the flow vector
     // at this point
     const double step_u = M_inv[0] * b[0] + M_inv[1] * b[1];
     const double step_v = M_inv[2] * b[0] + M_inv[3] * b[1];
-    *u += step_u * DISFLOW_STEP_SIZE;
-    *v += step_v * DISFLOW_STEP_SIZE;
+    *u += fclamp(step_u * DISFLOW_STEP_SIZE, -2, 2);
+    *v += fclamp(step_v * DISFLOW_STEP_SIZE, -2, 2);
 
     if (fabs(step_u) + fabs(step_v) < DISFLOW_STEP_SIZE_THRESOLD) {
       // Stop iteration when we're close to convergence
       break;
     }
-  }
-  if (fabs(*u - o_u) > DISFLOW_PATCH_SIZE ||
-      fabs(*v - o_v) > DISFLOW_PATCH_SIZE) {
-    *u = o_u;
-    *v = o_v;
   }
 }
 
@@ -615,11 +597,11 @@ static void free_flow_field(FlowField *flow) {
 // Following the convention in flow_estimation.h, the flow vectors are computed
 // at fixed points in `src` and point to the corresponding locations in `ref`,
 // regardless of the temporal ordering of the frames.
-int av1_compute_global_motion_disflow(TransformationType type,
-                                      YV12_BUFFER_CONFIG *src,
-                                      YV12_BUFFER_CONFIG *ref, int bit_depth,
-                                      MotionModel *motion_models,
-                                      int num_motion_models) {
+bool av1_compute_global_motion_disflow(TransformationType type,
+                                       YV12_BUFFER_CONFIG *src,
+                                       YV12_BUFFER_CONFIG *ref, int bit_depth,
+                                       MotionModel *motion_models,
+                                       int num_motion_models) {
   // Precompute information we will need about each frame
   ImagePyramid *src_pyramid = src->y_pyramid;
   CornerList *src_corners = src->corners;
@@ -634,24 +616,25 @@ int av1_compute_global_motion_disflow(TransformationType type,
   assert(ref_pyramid->layers[0].height == src_height);
 
   FlowField *flow = alloc_flow_field(src_width, src_height);
+  if (!flow) return false;
 
   compute_flow_field(src_pyramid, ref_pyramid, flow);
 
   // find correspondences between the two images using the flow field
   Correspondence *correspondences =
       aom_malloc(src_corners->num_corners * sizeof(*correspondences));
+  if (!correspondences) {
+    free_flow_field(flow);
+    return false;
+  }
+
   const int num_correspondences =
       determine_disflow_correspondence(src_corners, flow, correspondences);
 
-  ransac(correspondences, num_correspondences, type, motion_models,
-         num_motion_models);
+  bool result = ransac(correspondences, num_correspondences, type,
+                       motion_models, num_motion_models);
 
   aom_free(correspondences);
   free_flow_field(flow);
-
-  // Return true if any one of the motions has inliers.
-  for (int i = 0; i < num_motion_models; ++i) {
-    if (motion_models[i].num_inliers > 0) return true;
-  }
-  return false;
+  return result;
 }

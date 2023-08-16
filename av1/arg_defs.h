@@ -250,7 +250,7 @@ typedef struct av1_codec_arg_definitions {
   arg_def_t vmaf_quantization;
 #endif
 #if CONFIG_TUNE_BUTTERAUGLI
-  //arg_def_t butteraugli_rdo_bsize;
+  // arg_def_t butteraugli_rdo_bsize;
   arg_def_t butteraugli_intensity_target;
   arg_def_t butteraugli_hf_asymmetry;
   arg_def_t butteraugli_rd_mult;

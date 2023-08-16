@@ -37,10 +37,10 @@ typedef tuple<int, ComputeCrossCorrFunc> CornerMatchParam;
 
 class AV1CornerMatchTest : public ::testing::TestWithParam<CornerMatchParam> {
  public:
-  virtual ~AV1CornerMatchTest();
-  virtual void SetUp();
+  ~AV1CornerMatchTest() override;
+  void SetUp() override;
 
-  virtual void TearDown();
+  void TearDown() override;
 
  protected:
   void RunCheckOutput(int run_times);
@@ -50,7 +50,7 @@ class AV1CornerMatchTest : public ::testing::TestWithParam<CornerMatchParam> {
 };
 GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(AV1CornerMatchTest);
 
-AV1CornerMatchTest::~AV1CornerMatchTest() {}
+AV1CornerMatchTest::~AV1CornerMatchTest() = default;
 void AV1CornerMatchTest::SetUp() {
   rnd_.Reset(ACMRandom::DeterministicSeed());
   target_func = GET_PARAM(1);

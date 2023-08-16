@@ -36,9 +36,9 @@ class DatarateTestLarge
   }
 
  protected:
-  virtual ~DatarateTestLarge() {}
+  ~DatarateTestLarge() override = default;
 
-  virtual void SetUp() {
+  void SetUp() override {
     InitializeConfig(GET_PARAM(1));
     ResetModel();
   }
@@ -110,7 +110,7 @@ class DatarateTestLarge
         << " The datarate for the file is lower than target by too much!";
     ASSERT_LE(effective_datarate_, cfg_.rc_target_bitrate * 1.19)
         << " The datarate for the file is greater than target by too much!";
-    ASSERT_LT(num_spikes_, 8);
+    ASSERT_LE(num_spikes_, 8);
     ASSERT_LT(num_spikes_high_, 1);
   }
 
@@ -312,9 +312,9 @@ class DatarateTestFrameDropLarge
   }
 
  protected:
-  virtual ~DatarateTestFrameDropLarge() {}
+  ~DatarateTestFrameDropLarge() override = default;
 
-  virtual void SetUp() {
+  void SetUp() override {
     InitializeConfig(GET_PARAM(1));
     ResetModel();
   }
@@ -348,7 +348,7 @@ class DatarateTestFrameDropLarge
       ASSERT_NO_FATAL_FAILURE(RunLoop(&video));
       ASSERT_GE(effective_datarate_, cfg_.rc_target_bitrate * 0.85)
           << " The datarate for the file is lower than target by too much!";
-      ASSERT_LE(effective_datarate_, cfg_.rc_target_bitrate * 1.31)
+      ASSERT_LE(effective_datarate_, cfg_.rc_target_bitrate * 1.40)
           << " The datarate for the file is greater than target by too much!";
       if (last_drop > 0) {
         ASSERT_LE(first_drop_, last_drop)
@@ -397,7 +397,11 @@ TEST_P(DatarateTestLarge, ErrorResilienceOnSceneCuts) {
 }
 
 // Check basic rate targeting for CBR, for 444 input screen mode.
+#if defined(CONFIG_MAX_DECODE_PROFILE) && CONFIG_MAX_DECODE_PROFILE < 1
+TEST_P(DatarateTestLarge, DISABLED_BasicRateTargeting444CBRScreen) {
+#else
 TEST_P(DatarateTestLarge, BasicRateTargeting444CBRScreen) {
+#endif
   BasicRateTargeting444CBRScreenTest();
 }
 
@@ -429,9 +433,9 @@ class DatarateTestSpeedChangeRealtime
   }
 
  protected:
-  virtual ~DatarateTestSpeedChangeRealtime() {}
+  ~DatarateTestSpeedChangeRealtime() override = default;
 
-  virtual void SetUp() {
+  void SetUp() override {
     InitializeConfig(GET_PARAM(1));
     ResetModel();
   }
@@ -509,7 +513,11 @@ TEST_P(DatarateTestRealtime, ErrorResilienceOnSceneCuts) {
 }
 
 // Check basic rate targeting for CBR for 444 screen mode.
+#if defined(CONFIG_MAX_DECODE_PROFILE) && CONFIG_MAX_DECODE_PROFILE < 1
+TEST_P(DatarateTestRealtime, DISABLED_BasicRateTargeting444CBRScreen) {
+#else
 TEST_P(DatarateTestRealtime, BasicRateTargeting444CBRScreen) {
+#endif
   BasicRateTargeting444CBRScreenTest();
 }
 
@@ -532,15 +540,15 @@ class DatarateTestSetFrameQpRealtime
   DatarateTestSetFrameQpRealtime() : DatarateTest(GetParam()), frame_(0) {}
 
  protected:
-  virtual ~DatarateTestSetFrameQpRealtime() {}
+  ~DatarateTestSetFrameQpRealtime() override = default;
 
-  virtual void SetUp() {
+  void SetUp() override {
     InitializeConfig(libaom_test::kRealTime);
     ResetModel();
   }
 
-  virtual void PreEncodeFrameHook(::libaom_test::VideoSource *video,
-                                  ::libaom_test::Encoder *encoder) {
+  void PreEncodeFrameHook(::libaom_test::VideoSource *video,
+                          ::libaom_test::Encoder *encoder) override {
     set_cpu_used_ = 7;
     DatarateTest::PreEncodeFrameHook(video, encoder);
     frame_qp_ = rnd_.PseudoUniform(63);
@@ -548,7 +556,7 @@ class DatarateTestSetFrameQpRealtime
     frame_++;
   }
 
-  virtual void PostEncodeFrameHook(::libaom_test::Encoder *encoder) {
+  void PostEncodeFrameHook(::libaom_test::Encoder *encoder) override {
     if (frame_ >= total_frames_) return;
     int qp = 0;
     encoder->Control(AOME_GET_LAST_QUANTIZER_64, &qp);

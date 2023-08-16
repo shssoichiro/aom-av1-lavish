@@ -9,6 +9,7 @@
  * PATENTS file, you can obtain it at www.aomedia.org/license/patent.
  */
 #include <assert.h>
+#include <float.h>
 #include <string.h>
 
 #include "av1/encoder/encoder.h"
@@ -619,11 +620,12 @@ static int get_feature_map_orientation(const double *intensity, int width[9],
 static INLINE void find_min_max(const saliency_feature_map *input,
                                 double *max_value, double *min_value) {
   assert(input && input->buf);
-  *min_value = INT_MAX;
-  *max_value = INT_MIN;
+  *min_value = DBL_MAX;
+  *max_value = 0.0;
 
   for (int i = 0; i < input->height; ++i) {
     for (int j = 0; j < input->width; ++j) {
+      assert(input->buf[i * input->width + j] >= 0.0);
       *min_value = fmin(input->buf[i * input->width + j], *min_value);
       *max_value = fmax(input->buf[i * input->width + j], *max_value);
     }
@@ -1362,6 +1364,10 @@ int av1_setup_sm_rdmult_scaling_factor(AV1_COMP *cpi, double motion_ratio) {
   return 1;
 }
 
+// av1_setup_motion_ratio() is only enabled when CONFIG_REALTIME_ONLY is 0,
+// because the computations need to access the first pass stats which are
+// only available when CONFIG_REALTIME_ONLY is equal to 0.
+#if !CONFIG_REALTIME_ONLY
 // Set motion_ratio that reflects the motion quantities between two consecutive
 // frames. Motion_ratio will be used to set up saliency_map based rdmult scaling
 // factor, i.e., the less the motion quantities are, the more bits will be spent
@@ -1405,3 +1411,4 @@ double av1_setup_motion_ratio(AV1_COMP *cpi) {
 
   return motion_ratio;
 }
+#endif  // !CONFIG_REALTIME_ONLY

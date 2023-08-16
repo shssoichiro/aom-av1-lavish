@@ -1533,7 +1533,9 @@ typedef struct ThreadData {
   int32_t num_64x64_blocks;
   PICK_MODE_CONTEXT *firstpass_ctx;
   TemporalFilterData tf_data;
+  TplBuffers tpl_tmp_buffers;
   TplTxfmStats tpl_txfm_stats;
+  GlobalMotionData gm_data;
   // Pointer to the array of structures to store gradient information of each
   // pixel in a superblock. The buffer constitutes of MAX_SB_SQUARE pixel level
   // structures for each of the plane types (PLANE_TYPE_Y and PLANE_TYPE_UV).
@@ -1594,6 +1596,12 @@ typedef struct {
    * allocated.
    */
   int allocated_sb_rows;
+
+  /*!
+   * Initialized to false, set to true by the worker thread that encounters an
+   * error in order to abort the processing of other worker threads.
+   */
+  bool row_mt_exit;
 
 #if CONFIG_MULTITHREAD
   /*!
@@ -1727,6 +1735,11 @@ typedef struct PrimaryMultiThreadInfo {
    * Number of primary workers created for multi-threading.
    */
   int p_num_workers;
+
+  /*!
+   * Tracks the number of workers in encode stage multi-threading.
+   */
+  int prev_num_enc_workers;
 } PrimaryMultiThreadInfo;
 
 /*!
@@ -2507,7 +2520,7 @@ typedef struct RTC_REF {
    */
   unsigned int buffer_time_index[REF_FRAMES];
   /*!
-   * Saptial layer id of the last frame that refreshed the buffer slot.
+   * Spatial layer id of the last frame that refreshed the buffer slot.
    */
   unsigned char buffer_spatial_layer[REF_FRAMES];
   /*!
@@ -3617,6 +3630,12 @@ typedef struct AV1_COMP {
    */
   double *sm_scaling_factor;
 #endif
+
+  /*!
+   * Number of pixels that choose palette mode for luma in the
+   * fast encoding pass in av1_determine_sc_tools_with_encoding().
+   */
+  int palette_pixel_num;
 } AV1_COMP;
 
 /*!
@@ -4332,7 +4351,9 @@ static INLINE unsigned int derive_skip_apply_postproc_filters(
   }
   if (use_loopfilter) return SKIP_APPLY_LOOPFILTER;
 
-  return 0;  // All post-processing stages disabled.
+  // If we reach here, all post-processing stages are disabled, so none need to
+  // be skipped.
+  return 0;
 }
 
 static INLINE void set_postproc_filter_default_params(AV1_COMMON *cm) {

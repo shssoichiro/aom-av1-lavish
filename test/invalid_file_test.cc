@@ -45,7 +45,7 @@ class InvalidFileTest : public ::libaom_test::DecoderTest,
  protected:
   InvalidFileTest() : DecoderTest(GET_PARAM(0)), res_file_(nullptr) {}
 
-  virtual ~InvalidFileTest() {
+  ~InvalidFileTest() override {
     if (res_file_ != nullptr) fclose(res_file_);
   }
 
@@ -55,15 +55,14 @@ class InvalidFileTest : public ::libaom_test::DecoderTest,
         << "Result file open failed. Filename: " << res_file_name;
   }
 
-  virtual void DecompressedFrameHook(const aom_image_t &img,
-                                     const unsigned int /*frame_number*/) {
+  void DecompressedFrameHook(const aom_image_t &img,
+                             const unsigned int /*frame_number*/) override {
     EXPECT_NE(img.fb_priv, nullptr);
   }
 
-  virtual bool HandleDecodeResult(
-      const aom_codec_err_t res_dec,
-      const libaom_test::CompressedVideoSource &video,
-      libaom_test::Decoder *decoder) {
+  bool HandleDecodeResult(const aom_codec_err_t res_dec,
+                          const libaom_test::CompressedVideoSource &video,
+                          libaom_test::Decoder *decoder) override {
     EXPECT_NE(res_file_, nullptr);
     int expected_res_dec = -1;
 
@@ -95,9 +94,9 @@ class InvalidFileTest : public ::libaom_test::DecoderTest,
     return !HasFailure();
   }
 
-  virtual void HandlePeekResult(libaom_test::Decoder *const /*decoder*/,
-                                libaom_test::CompressedVideoSource * /*video*/,
-                                const aom_codec_err_t /*res_peek*/) {}
+  void HandlePeekResult(libaom_test::Decoder *const /*decoder*/,
+                        libaom_test::CompressedVideoSource * /*video*/,
+                        const aom_codec_err_t /*res_peek*/) override {}
 
   void RunTest() {
     const DecodeParam input = GET_PARAM(1);
@@ -133,10 +132,16 @@ const DecodeParam kAV1InvalidFileTests[] = {
   { 4, "invalid-oss-fuzz-9463.ivf", "invalid-oss-fuzz-9463.ivf.res.2" },
   { 1, "invalid-oss-fuzz-9720.ivf", nullptr },
   { 1, "invalid-oss-fuzz-10389.ivf", "invalid-oss-fuzz-10389.ivf.res.4" },
+#if !CHROMIUM && !CONFIG_SIZE_LIMIT ||                  \
+    (CONFIG_SIZE_LIMIT && DECODE_WIDTH_LIMIT >= 5120 && \
+     DECODE_HEIGHT_LIMIT >= 180)
   { 1, "invalid-oss-fuzz-11523.ivf", "invalid-oss-fuzz-11523.ivf.res.2" },
+#endif
   { 4, "invalid-oss-fuzz-15363.ivf", nullptr },
   { 1, "invalid-oss-fuzz-16437.ivf", "invalid-oss-fuzz-16437.ivf.res.2" },
+#if CONFIG_MAX_DECODE_PROFILE >= 1
   { 1, "invalid-oss-fuzz-24706.ivf", nullptr },
+#endif
 #if CONFIG_AV1_HIGHBITDEPTH
   // These test vectors contain 10-bit or 12-bit video.
   { 1, "invalid-oss-fuzz-9288.ivf", nullptr },
@@ -146,7 +151,11 @@ const DecodeParam kAV1InvalidFileTests[] = {
   { 1, "invalid-oss-fuzz-10227.ivf", nullptr },
   { 4, "invalid-oss-fuzz-10555.ivf", nullptr },
   { 1, "invalid-oss-fuzz-10705.ivf", nullptr },
+#if CONFIG_CWG_C013
   { 1, "invalid-oss-fuzz-10723.ivf", "invalid-oss-fuzz-10723.ivf.res.3" },
+#else
+  { 1, "invalid-oss-fuzz-10723.ivf", "invalid-oss-fuzz-10723.ivf.res.2" },
+#endif
   { 1, "invalid-oss-fuzz-10779.ivf", nullptr },
   { 1, "invalid-oss-fuzz-11477.ivf", nullptr },
   { 1, "invalid-oss-fuzz-11479.ivf", "invalid-oss-fuzz-11479.ivf.res.2" },

@@ -12,20 +12,27 @@
 //  encoding scheme for RTC video applications.
 
 #include <assert.h>
+#include <limits.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
+#include <memory>
+
+#include "config/aom_config.h"
+
+#if CONFIG_AV1_DECODER
+#include "aom/aom_decoder.h"
+#endif
 #include "aom/aom_encoder.h"
 #include "aom/aomcx.h"
-#include "av1/common/enums.h"
-#include "av1/encoder/encoder.h"
 #include "common/args.h"
 #include "common/tools_common.h"
 #include "common/video_writer.h"
 #include "examples/encoder_util.h"
 #include "aom_ports/aom_timer.h"
+#include "av1/ratectrl_rtc.h"
 
 #define OPTION_BUFFER_SIZE 1024
 
@@ -39,6 +46,8 @@ typedef struct {
   int output_obu;
   int decode;
   int tune_content;
+  int show_psnr;
+  bool use_external_rc;
 } AppInput;
 
 typedef enum {
@@ -92,6 +101,10 @@ static const arg_def_t output_obu_arg =
 static const arg_def_t test_decode_arg =
     ARG_DEF(NULL, "test-decode", 1,
             "Attempt to test decoding the output when set to 1. Default is 1.");
+static const arg_def_t psnr_arg =
+    ARG_DEF(NULL, "psnr", -1, "Show PSNR in status line.");
+static const arg_def_t ext_rc_arg =
+    ARG_DEF(NULL, "use-ext-rc", 0, "Use external rate control.");
 static const struct arg_enum_list tune_content_enum[] = {
   { "default", AOM_CONTENT_DEFAULT },
   { "screen", AOM_CONTENT_SCREEN },
@@ -110,32 +123,19 @@ static const arg_def_t bitdepth_arg = ARG_DEF_ENUM(
     "d", "bit-depth", 1, "Bit depth for codec 8 or 10. ", bitdepth_enum);
 #endif  // CONFIG_AV1_HIGHBITDEPTH
 
-static const arg_def_t *svc_args[] = { &frames_arg,
-                                       &outputfile,
-                                       &width_arg,
-                                       &height_arg,
-                                       &timebase_arg,
-                                       &bitrate_arg,
-                                       &spatial_layers_arg,
-                                       &kf_dist_arg,
-                                       &scale_factors_arg,
-                                       &min_q_arg,
-                                       &max_q_arg,
-                                       &temporal_layers_arg,
-                                       &layering_mode_arg,
-                                       &threads_arg,
-                                       &aqmode_arg,
+static const arg_def_t *svc_args[] = {
+  &frames_arg,          &outputfile,     &width_arg,
+  &height_arg,          &timebase_arg,   &bitrate_arg,
+  &spatial_layers_arg,  &kf_dist_arg,    &scale_factors_arg,
+  &min_q_arg,           &max_q_arg,      &temporal_layers_arg,
+  &layering_mode_arg,   &threads_arg,    &aqmode_arg,
 #if CONFIG_AV1_HIGHBITDEPTH
-                                       &bitdepth_arg,
+  &bitdepth_arg,
 #endif
-                                       &speed_arg,
-                                       &bitrates_arg,
-                                       &dropframe_thresh_arg,
-                                       &error_resilient_arg,
-                                       &output_obu_arg,
-                                       &test_decode_arg,
-                                       &tune_content_arg,
-                                       NULL };
+  &speed_arg,           &bitrates_arg,   &dropframe_thresh_arg,
+  &error_resilient_arg, &output_obu_arg, &test_decode_arg,
+  &tune_content_arg,    &psnr_arg,       NULL,
+};
 
 #define zero(Dest) memset(&(Dest), 0, sizeof(Dest))
 
@@ -202,7 +202,7 @@ static void open_input_file(struct AvxInputContext *input,
       input->framerate.numerator = input->y4m.fps_n;
       input->framerate.denominator = input->y4m.fps_d;
       input->fmt = input->y4m.aom_fmt;
-      input->bit_depth = input->y4m.bit_depth;
+      input->bit_depth = static_cast<aom_bit_depth_t>(input->y4m.bit_depth);
     } else {
       fatal("Unsupported Y4M stream.");
     }
@@ -252,10 +252,10 @@ static aom_codec_err_t parse_layer_options_from_string(
       (option1 == NULL && type == SCALE_FACTOR))
     return AOM_CODEC_INVALID_PARAM;
 
-  input_string = malloc(strlen(input));
-  if (!input_string) die("Failed to allocate input string.");
-  memcpy(input_string, input, strlen(input));
+  const size_t input_length = strlen(input);
+  input_string = reinterpret_cast<char *>(malloc(input_length + 1));
   if (input_string == NULL) return AOM_CODEC_MEM_ERROR;
+  memcpy(input_string, input, input_length + 1);
   token = strtok(input_string, delim);  // NOLINT
   for (i = 0; i < num_layers; ++i) {
     if (token != NULL) {
@@ -263,11 +263,9 @@ static aom_codec_err_t parse_layer_options_from_string(
       if (res != AOM_CODEC_OK) break;
       token = strtok(NULL, delim);  // NOLINT
     } else {
+      res = AOM_CODEC_INVALID_PARAM;
       break;
     }
-  }
-  if (res == AOM_CODEC_OK && i != num_layers) {
-    res = AOM_CODEC_INVALID_PARAM;
   }
   free(input_string);
   return res;
@@ -330,16 +328,21 @@ static void parse_command_line(int argc, const char **argv_,
       enc_cfg->kf_min_dist = arg_parse_uint(&arg);
       enc_cfg->kf_max_dist = enc_cfg->kf_min_dist;
     } else if (arg_match(&arg, &scale_factors_arg, argi)) {
-      parse_layer_options_from_string(svc_params, SCALE_FACTOR, arg.val,
-                                      svc_params->scaling_factor_num,
-                                      svc_params->scaling_factor_den);
+      aom_codec_err_t res = parse_layer_options_from_string(
+          svc_params, SCALE_FACTOR, arg.val, svc_params->scaling_factor_num,
+          svc_params->scaling_factor_den);
+      if (res != AOM_CODEC_OK) {
+        die("Failed to parse scale factors: %s\n",
+            aom_codec_err_to_string(res));
+      }
     } else if (arg_match(&arg, &min_q_arg, argi)) {
       enc_cfg->rc_min_quantizer = arg_parse_uint(&arg);
     } else if (arg_match(&arg, &max_q_arg, argi)) {
       enc_cfg->rc_max_quantizer = arg_parse_uint(&arg);
 #if CONFIG_AV1_HIGHBITDEPTH
     } else if (arg_match(&arg, &bitdepth_arg, argi)) {
-      enc_cfg->g_bit_depth = arg_parse_enum_or_int(&arg);
+      enc_cfg->g_bit_depth =
+          static_cast<aom_bit_depth_t>(arg_parse_enum_or_int(&arg));
       switch (enc_cfg->g_bit_depth) {
         case AOM_BITS_8:
           enc_cfg->g_input_bit_depth = 8;
@@ -351,7 +354,6 @@ static void parse_command_line(int argc, const char **argv_,
           break;
         default:
           die("Error: Invalid bit depth selected (%d)\n", enc_cfg->g_bit_depth);
-          break;
       }
 #endif  // CONFIG_VP9_HIGHBITDEPTH
     } else if (arg_match(&arg, &dropframe_thresh_arg, argi)) {
@@ -374,6 +376,10 @@ static void parse_command_line(int argc, const char **argv_,
     } else if (arg_match(&arg, &tune_content_arg, argi)) {
       app_input->tune_content = arg_parse_enum_or_int(&arg);
       printf("tune content %d\n", app_input->tune_content);
+    } else if (arg_match(&arg, &psnr_arg, argi)) {
+      app_input->show_psnr = 1;
+    } else if (arg_match(&arg, &ext_rc_arg, argi)) {
+      app_input->use_external_rc = true;
     } else {
       ++argj;
     }
@@ -383,8 +389,11 @@ static void parse_command_line(int argc, const char **argv_,
   for (argi = argj = argv; (*argj = *argi); argi += arg.argv_step) {
     arg.argv_step = 1;
     if (arg_match(&arg, &bitrates_arg, argi)) {
-      parse_layer_options_from_string(svc_params, BITRATE, arg.val,
-                                      svc_params->layer_target_bitrate, NULL);
+      aom_codec_err_t res = parse_layer_options_from_string(
+          svc_params, BITRATE, arg.val, svc_params->layer_target_bitrate, NULL);
+      if (res != AOM_CODEC_OK) {
+        die("Failed to parse bitrates: %s\n", aom_codec_err_to_string(res));
+      }
     } else {
       ++argj;
     }
@@ -406,7 +415,7 @@ static void parse_command_line(int argc, const char **argv_,
   app_input->input_ctx.filename = argv[0];
   free(argv);
 
-  open_input_file(&app_input->input_ctx, 0);
+  open_input_file(&app_input->input_ctx, AOM_CSP_UNKNOWN);
   if (app_input->input_ctx.file_type == FILE_TYPE_Y4M) {
     enc_cfg->g_w = app_input->input_ctx.width;
     enc_cfg->g_h = app_input->input_ctx.height;
@@ -428,10 +437,12 @@ static void parse_command_line(int argc, const char **argv_,
       enc_cfg->rc_target_bitrate, enc_cfg->kf_max_dist);
 }
 
-static unsigned int mode_to_num_temporal_layers[11] = { 1, 2, 3, 3, 2, 1,
-                                                        1, 3, 3, 3, 3 };
-static unsigned int mode_to_num_spatial_layers[11] = { 1, 1, 1, 1, 1, 2,
-                                                       3, 2, 3, 3, 3 };
+static int mode_to_num_temporal_layers[12] = {
+  1, 2, 3, 3, 2, 1, 1, 3, 3, 3, 3, 3,
+};
+static int mode_to_num_spatial_layers[12] = {
+  1, 1, 1, 1, 1, 2, 3, 2, 3, 3, 3, 3,
+};
 
 // For rate control encoding stats.
 struct RateControlMetrics {
@@ -460,6 +471,10 @@ struct RateControlMetrics {
   int window_count;
   int layer_target_bitrate[AOM_MAX_LAYERS];
 };
+
+static const int REF_FRAMES = 8;
+
+static const int INTER_REFS_PER_FRAME = 7;
 
 // Reference frames used in this example encoder.
 enum {
@@ -498,9 +513,8 @@ static void close_input_file(struct AvxInputContext *input) {
 // TODO(marpan): Update these metrics to account for multiple key frames
 // in the stream.
 static void set_rate_control_metrics(struct RateControlMetrics *rc,
-                                     double framerate,
-                                     unsigned int ss_number_layers,
-                                     unsigned int ts_number_layers) {
+                                     double framerate, int ss_number_layers,
+                                     int ts_number_layers) {
   int ts_rate_decimator[AOM_MAX_TS_LAYERS] = { 1 };
   ts_rate_decimator[0] = 1;
   if (ts_number_layers == 2) {
@@ -514,12 +528,12 @@ static void set_rate_control_metrics(struct RateControlMetrics *rc,
   }
   // Set the layer (cumulative) framerate and the target layer (non-cumulative)
   // per-frame-bandwidth, for the rate control encoding stats below.
-  for (unsigned int sl = 0; sl < ss_number_layers; ++sl) {
-    unsigned int i = sl * ts_number_layers;
+  for (int sl = 0; sl < ss_number_layers; ++sl) {
+    int i = sl * ts_number_layers;
     rc->layer_framerate[0] = framerate / ts_rate_decimator[0];
     rc->layer_pfb[i] =
         1000.0 * rc->layer_target_bitrate[i] / rc->layer_framerate[0];
-    for (unsigned int tl = 0; tl < ts_number_layers; ++tl) {
+    for (int tl = 0; tl < ts_number_layers; ++tl) {
       i = sl * ts_number_layers + tl;
       if (tl > 0) {
         rc->layer_framerate[tl] = framerate / ts_rate_decimator[tl];
@@ -542,17 +556,16 @@ static void set_rate_control_metrics(struct RateControlMetrics *rc,
 }
 
 static void printout_rate_control_summary(struct RateControlMetrics *rc,
-                                          int frame_cnt,
-                                          unsigned int ss_number_layers,
-                                          unsigned int ts_number_layers) {
+                                          int frame_cnt, int ss_number_layers,
+                                          int ts_number_layers) {
   int tot_num_frames = 0;
   double perc_fluctuation = 0.0;
   printf("Total number of processed frames: %d\n\n", frame_cnt - 1);
-  printf("Rate control layer stats for %u layer(s):\n\n", ts_number_layers);
-  for (unsigned int sl = 0; sl < ss_number_layers; ++sl) {
+  printf("Rate control layer stats for %d layer(s):\n\n", ts_number_layers);
+  for (int sl = 0; sl < ss_number_layers; ++sl) {
     tot_num_frames = 0;
-    for (unsigned int tl = 0; tl < ts_number_layers; ++tl) {
-      unsigned int i = sl * ts_number_layers + tl;
+    for (int tl = 0; tl < ts_number_layers; ++tl) {
+      int i = sl * ts_number_layers + tl;
       const int num_dropped =
           tl > 0 ? rc->layer_input_frames[tl] - rc->layer_enc_frames[tl]
                  : rc->layer_input_frames[tl] - rc->layer_enc_frames[tl] - 1;
@@ -564,7 +577,7 @@ static void printout_rate_control_summary(struct RateControlMetrics *rc,
           rc->layer_avg_frame_size[i] / rc->layer_enc_frames[tl];
       rc->layer_avg_rate_mismatch[i] =
           100.0 * rc->layer_avg_rate_mismatch[i] / rc->layer_enc_frames[tl];
-      printf("For layer#: %u %u \n", sl, tl);
+      printf("For layer#: %d %d \n", sl, tl);
       printf("Bitrate (target vs actual): %d %f\n", rc->layer_target_bitrate[i],
              rc->layer_encoding_bitrate[i]);
       printf("Average frame size (target vs actual): %f %f\n", rc->layer_pfb[i],
@@ -604,6 +617,7 @@ static void set_layer_pattern(
   int i;
   int enable_longterm_temporal_ref = 1;
   int shift = (layering_mode == 8) ? 2 : 0;
+  int simulcast_mode = (layering_mode == 11);
   *use_svc_control = 1;
   layer_id->spatial_layer_id = spatial_layer_id;
   int lag_index = 0;
@@ -710,15 +724,17 @@ static void set_layer_pattern(
         // Refresh lag_index slot, needed for lagging golen.
         ref_frame_config->refresh[lag_index] = 1;
         // Refresh GOLDEN every x base layer frames.
-        if (base_count % 16 == 0) ref_frame_config->refresh[3] = 1;
+        if (base_count % 32 == 0) ref_frame_config->refresh[3] = 1;
       } else {
         layer_id->temporal_layer_id = 1;
         // No updates on layer 1, reference LAST (TL0).
         ref_frame_config->reference[SVC_LAST_FRAME] = 1;
       }
-      // Always reference golden and altref
-      ref_frame_config->reference[SVC_GOLDEN_FRAME] = 1;
-      ref_frame_config->reference[SVC_ALTREF_FRAME] = 1;
+      // Always reference golden and altref on TL0.
+      if (layer_id->temporal_layer_id == 0) {
+        ref_frame_config->reference[SVC_GOLDEN_FRAME] = 1;
+        ref_frame_config->reference[SVC_ALTREF_FRAME] = 1;
+      }
       break;
     case 2:
       // 3-temporal layer:
@@ -798,8 +814,11 @@ static void set_layer_pattern(
       // Every frame can reference GOLDEN AND ALTREF.
       ref_frame_config->reference[SVC_GOLDEN_FRAME] = 1;
       ref_frame_config->reference[SVC_ALTREF_FRAME] = 1;
-      // Allow for compound prediction using LAST and ALTREF.
-      if (speed >= 7) ref_frame_comp_pred->use_comp_pred[2] = 1;
+      // Allow for compound prediction for LAST-ALTREF and LAST-GOLDEN.
+      if (speed >= 7) {
+        ref_frame_comp_pred->use_comp_pred[2] = 1;
+        ref_frame_comp_pred->use_comp_pred[0] = 1;
+      }
       break;
     case 4:
       // 3-temporal layer: but middle layer updates GF, so 2nd TL2 will
@@ -1094,7 +1113,173 @@ static void set_layer_pattern(
           ref_frame_config->ref_idx[SVC_GOLDEN_FRAME] = 4;
         }
       }
-      if (layer_id->spatial_layer_id > 0) {
+      break;
+    case 11:
+      // Simulcast mode for 3 spatial and 3 temporal layers.
+      // No inter-layer predicton, only prediction is temporal and single
+      // reference (LAST).
+      // No overlap in buffer slots between spatial layers. So for example,
+      // SL0 only uses slots 0 and 1.
+      // SL1 only uses slots 2 and 3.
+      // SL2 only uses slots 4 and 5.
+      // All 7 references for each inter-frame must only access buffer slots
+      // for that spatial layer.
+      // On key (super)frames: SL1 and SL2 must have no references set
+      // and must refresh all the slots for that layer only (so 2 and 3
+      // for SL1, 4 and 5 for SL2). The base SL0 will be labelled internally
+      // as a Key frame (refresh all slots). SL1/SL2 will be labelled
+      // internally as Intra-only frames that allow that stream to be decoded.
+      // These conditions will allow for each spatial stream to be
+      // independently decodeable.
+
+      // Initialize all references to 0 (don't use reference).
+      for (i = 0; i < INTER_REFS_PER_FRAME; i++)
+        ref_frame_config->reference[i] = 0;
+      // Initialize as no refresh/update for all slots.
+      for (i = 0; i < REF_FRAMES; i++) ref_frame_config->refresh[i] = 0;
+      for (i = 0; i < INTER_REFS_PER_FRAME; i++)
+        ref_frame_config->ref_idx[i] = 0;
+
+      if (is_key_frame) {
+        if (layer_id->spatial_layer_id == 0) {
+          // Assign LAST/GOLDEN to slot 0/1.
+          // Refesh slots 0 and 1 for SL0.
+          // SL0: this will get set to KEY frame internally.
+          ref_frame_config->ref_idx[SVC_LAST_FRAME] = 0;
+          ref_frame_config->ref_idx[SVC_GOLDEN_FRAME] = 1;
+          ref_frame_config->refresh[0] = 1;
+          ref_frame_config->refresh[1] = 1;
+        } else if (layer_id->spatial_layer_id == 1) {
+          // Assign LAST/GOLDEN to slot 2/3.
+          // Refesh slots 2 and 3 for SL1.
+          // This will get set to Intra-only frame internally.
+          ref_frame_config->ref_idx[SVC_LAST_FRAME] = 2;
+          ref_frame_config->ref_idx[SVC_GOLDEN_FRAME] = 3;
+          ref_frame_config->refresh[2] = 1;
+          ref_frame_config->refresh[3] = 1;
+        } else if (layer_id->spatial_layer_id == 2) {
+          // Assign LAST/GOLDEN to slot 4/5.
+          // Refresh slots 4 and 5 for SL2.
+          // This will get set to Intra-only frame internally.
+          ref_frame_config->ref_idx[SVC_LAST_FRAME] = 4;
+          ref_frame_config->ref_idx[SVC_GOLDEN_FRAME] = 5;
+          ref_frame_config->refresh[4] = 1;
+          ref_frame_config->refresh[5] = 1;
+        }
+      } else if (superframe_cnt % 4 == 0) {
+        // Base temporal layer: TL0
+        layer_id->temporal_layer_id = 0;
+        if (layer_id->spatial_layer_id == 0) {  // SL0
+          // Reference LAST. Assign all references to either slot
+          // 0 or 1. Here we assign LAST to slot 0, all others to 1.
+          // Update slot 0 (LAST).
+          ref_frame_config->reference[SVC_LAST_FRAME] = 1;
+          for (i = 0; i < INTER_REFS_PER_FRAME; i++)
+            ref_frame_config->ref_idx[i] = 1;
+          ref_frame_config->ref_idx[SVC_LAST_FRAME] = 0;
+          ref_frame_config->refresh[0] = 1;
+        } else if (layer_id->spatial_layer_id == 1) {  // SL1
+          // Reference LAST. Assign all references to either slot
+          // 2 or 3. Here we assign LAST to slot 2, all others to 3.
+          // Update slot 2 (LAST).
+          ref_frame_config->reference[SVC_LAST_FRAME] = 1;
+          for (i = 0; i < INTER_REFS_PER_FRAME; i++)
+            ref_frame_config->ref_idx[i] = 3;
+          ref_frame_config->ref_idx[SVC_LAST_FRAME] = 2;
+          ref_frame_config->refresh[2] = 1;
+        } else if (layer_id->spatial_layer_id == 2) {  // SL2
+          // Reference LAST. Assign all references to either slot
+          // 4 or 5. Here we assign LAST to slot 4, all others to 5.
+          // Update slot 4 (LAST).
+          ref_frame_config->reference[SVC_LAST_FRAME] = 1;
+          for (i = 0; i < INTER_REFS_PER_FRAME; i++)
+            ref_frame_config->ref_idx[i] = 5;
+          ref_frame_config->ref_idx[SVC_LAST_FRAME] = 4;
+          ref_frame_config->refresh[4] = 1;
+        }
+      } else if ((superframe_cnt - 1) % 4 == 0) {
+        // First top temporal enhancement layer: TL2
+        layer_id->temporal_layer_id = 2;
+        if (layer_id->spatial_layer_id == 0) {  // SL0
+          // Reference LAST (slot 0). Assign other references to slot 1.
+          // No update/refresh on any slots.
+          ref_frame_config->reference[SVC_LAST_FRAME] = 1;
+          for (i = 0; i < INTER_REFS_PER_FRAME; i++)
+            ref_frame_config->ref_idx[i] = 1;
+          ref_frame_config->ref_idx[SVC_LAST_FRAME] = 0;
+        } else if (layer_id->spatial_layer_id == 1) {  // SL1
+          // Reference LAST (slot 2). Assign other references to slot 3.
+          // No update/refresh on any slots.
+          ref_frame_config->reference[SVC_LAST_FRAME] = 1;
+          for (i = 0; i < INTER_REFS_PER_FRAME; i++)
+            ref_frame_config->ref_idx[i] = 3;
+          ref_frame_config->ref_idx[SVC_LAST_FRAME] = 2;
+        } else if (layer_id->spatial_layer_id == 2) {  // SL2
+          // Reference LAST (slot 4). Assign other references to slot 4.
+          // No update/refresh on any slots.
+          ref_frame_config->reference[SVC_LAST_FRAME] = 1;
+          for (i = 0; i < INTER_REFS_PER_FRAME; i++)
+            ref_frame_config->ref_idx[i] = 5;
+          ref_frame_config->ref_idx[SVC_LAST_FRAME] = 4;
+        }
+      } else if ((superframe_cnt - 2) % 4 == 0) {
+        // Middle temporal enhancement layer: TL1
+        layer_id->temporal_layer_id = 1;
+        if (layer_id->spatial_layer_id == 0) {  // SL0
+          // Reference LAST (slot 0).
+          // Set GOLDEN to slot 1 and update slot 1.
+          // This will be used as reference for next TL2.
+          ref_frame_config->reference[SVC_LAST_FRAME] = 1;
+          for (i = 0; i < INTER_REFS_PER_FRAME; i++)
+            ref_frame_config->ref_idx[i] = 1;
+          ref_frame_config->ref_idx[SVC_LAST_FRAME] = 0;
+          ref_frame_config->refresh[1] = 1;
+        } else if (layer_id->spatial_layer_id == 1) {  // SL1
+          // Reference LAST (slot 2).
+          // Set GOLDEN to slot 3 and update slot 3.
+          // This will be used as reference for next TL2.
+          ref_frame_config->reference[SVC_LAST_FRAME] = 1;
+          for (i = 0; i < INTER_REFS_PER_FRAME; i++)
+            ref_frame_config->ref_idx[i] = 3;
+          ref_frame_config->ref_idx[SVC_LAST_FRAME] = 2;
+          ref_frame_config->refresh[3] = 1;
+        } else if (layer_id->spatial_layer_id == 2) {  // SL2
+          // Reference LAST (slot 4).
+          // Set GOLDEN to slot 5 and update slot 5.
+          // This will be used as reference for next TL2.
+          ref_frame_config->reference[SVC_LAST_FRAME] = 1;
+          for (i = 0; i < INTER_REFS_PER_FRAME; i++)
+            ref_frame_config->ref_idx[i] = 5;
+          ref_frame_config->ref_idx[SVC_LAST_FRAME] = 4;
+          ref_frame_config->refresh[5] = 1;
+        }
+      } else if ((superframe_cnt - 3) % 4 == 0) {
+        // Second top temporal enhancement layer: TL2
+        layer_id->temporal_layer_id = 2;
+        if (layer_id->spatial_layer_id == 0) {  // SL0
+          // Reference LAST (slot 1). Assign other references to slot 0.
+          // No update/refresh on any slots.
+          ref_frame_config->reference[SVC_LAST_FRAME] = 1;
+          for (i = 0; i < INTER_REFS_PER_FRAME; i++)
+            ref_frame_config->ref_idx[i] = 0;
+          ref_frame_config->ref_idx[SVC_LAST_FRAME] = 1;
+        } else if (layer_id->spatial_layer_id == 1) {  // SL1
+          // Reference LAST (slot 3). Assign other references to slot 2.
+          // No update/refresh on any slots.
+          ref_frame_config->reference[SVC_LAST_FRAME] = 1;
+          for (i = 0; i < INTER_REFS_PER_FRAME; i++)
+            ref_frame_config->ref_idx[i] = 2;
+          ref_frame_config->ref_idx[SVC_LAST_FRAME] = 3;
+        } else if (layer_id->spatial_layer_id == 2) {  // SL2
+          // Reference LAST (slot 5). Assign other references to slot 4.
+          // No update/refresh on any slots.
+          ref_frame_config->reference[SVC_LAST_FRAME] = 1;
+          for (i = 0; i < INTER_REFS_PER_FRAME; i++)
+            ref_frame_config->ref_idx[i] = 4;
+          ref_frame_config->ref_idx[SVC_LAST_FRAME] = 5;
+        }
+      }
+      if (!simulcast_mode && layer_id->spatial_layer_id > 0) {
         // Always reference GOLDEN (inter-layer prediction).
         ref_frame_config->reference[SVC_GOLDEN_FRAME] = 1;
         if (ksvc_mode) {
@@ -1112,8 +1297,8 @@ static void set_layer_pattern(
       // allow for top spatial layer to use additional temporal reference.
       // Additional reference is only updated on base temporal layer, every
       // 10 TL0 frames here.
-      if (enable_longterm_temporal_ref && layer_id->spatial_layer_id == 2 &&
-          layering_mode == 8) {
+      if (!simulcast_mode && enable_longterm_temporal_ref &&
+          layer_id->spatial_layer_id == 2 && layering_mode == 8) {
         ref_frame_config->ref_idx[SVC_ALTREF_FRAME] = REF_FRAMES - 1;
         if (!is_key_frame) ref_frame_config->reference[SVC_ALTREF_FRAME] = 1;
         if (base_count % 10 == 0 && layer_id->temporal_layer_id == 0)
@@ -1125,13 +1310,14 @@ static void set_layer_pattern(
 }
 
 #if CONFIG_AV1_DECODER
-static void test_decode(aom_codec_ctx_t *encoder, aom_codec_ctx_t *decoder,
-                        const int frames_out, int *mismatch_seen) {
+// Returns whether there is a mismatch between the encoder's new frame and the
+// decoder's new frame.
+static int test_decode(aom_codec_ctx_t *encoder, aom_codec_ctx_t *decoder,
+                       const int frames_out) {
   aom_image_t enc_img, dec_img;
+  int mismatch = 0;
 
-  if (*mismatch_seen) return;
-
-  /* Get the internal reference frame */
+  /* Get the internal new frame */
   AOM_CODEC_CONTROL_TYPECHECKED(encoder, AV1_GET_NEW_FRAME_IMAGE, &enc_img);
   AOM_CODEC_CONTROL_TYPECHECKED(decoder, AV1_GET_NEW_FRAME_IMAGE, &dec_img);
 
@@ -1140,15 +1326,19 @@ static void test_decode(aom_codec_ctx_t *encoder, aom_codec_ctx_t *decoder,
       (dec_img.fmt & AOM_IMG_FMT_HIGHBITDEPTH)) {
     if (enc_img.fmt & AOM_IMG_FMT_HIGHBITDEPTH) {
       aom_image_t enc_hbd_img;
-      aom_img_alloc(&enc_hbd_img, enc_img.fmt - AOM_IMG_FMT_HIGHBITDEPTH,
-                    enc_img.d_w, enc_img.d_h, 16);
+      aom_img_alloc(
+          &enc_hbd_img,
+          static_cast<aom_img_fmt_t>(enc_img.fmt - AOM_IMG_FMT_HIGHBITDEPTH),
+          enc_img.d_w, enc_img.d_h, 16);
       aom_img_truncate_16_to_8(&enc_hbd_img, &enc_img);
       enc_img = enc_hbd_img;
     }
     if (dec_img.fmt & AOM_IMG_FMT_HIGHBITDEPTH) {
       aom_image_t dec_hbd_img;
-      aom_img_alloc(&dec_hbd_img, dec_img.fmt - AOM_IMG_FMT_HIGHBITDEPTH,
-                    dec_img.d_w, dec_img.d_h, 16);
+      aom_img_alloc(
+          &dec_hbd_img,
+          static_cast<aom_img_fmt_t>(dec_img.fmt - AOM_IMG_FMT_HIGHBITDEPTH),
+          dec_img.d_w, dec_img.d_h, 16);
       aom_img_truncate_16_to_8(&dec_hbd_img, &dec_img);
       dec_img = dec_hbd_img;
     }
@@ -1166,21 +1356,91 @@ static void test_decode(aom_codec_ctx_t *encoder, aom_codec_ctx_t *decoder,
 #else
     aom_find_mismatch(&enc_img, &dec_img, y, u, v);
 #endif
-    decoder->err = 1;
-    printf(
-        "Encode/decode mismatch on frame %d at"
-        " Y[%d, %d] {%d/%d},"
-        " U[%d, %d] {%d/%d},"
-        " V[%d, %d] {%d/%d}",
-        frames_out, y[0], y[1], y[2], y[3], u[0], u[1], u[2], u[3], v[0], v[1],
-        v[2], v[3]);
-    *mismatch_seen = frames_out;
+    fprintf(stderr,
+            "Encode/decode mismatch on frame %d at"
+            " Y[%d, %d] {%d/%d},"
+            " U[%d, %d] {%d/%d},"
+            " V[%d, %d] {%d/%d}\n",
+            frames_out, y[0], y[1], y[2], y[3], u[0], u[1], u[2], u[3], v[0],
+            v[1], v[2], v[3]);
+    mismatch = 1;
   }
 
   aom_img_free(&enc_img);
   aom_img_free(&dec_img);
+  return mismatch;
 }
 #endif  // CONFIG_AV1_DECODER
+
+struct psnr_stats {
+  // The second element of these arrays is reserved for high bitdepth.
+  uint64_t psnr_sse_total[2];
+  uint64_t psnr_samples_total[2];
+  double psnr_totals[2][4];
+  int psnr_count[2];
+};
+
+static void show_psnr(struct psnr_stats *psnr_stream, double peak) {
+  double ovpsnr;
+
+  if (!psnr_stream->psnr_count[0]) return;
+
+  fprintf(stderr, "\nPSNR (Overall/Avg/Y/U/V)");
+  ovpsnr = sse_to_psnr((double)psnr_stream->psnr_samples_total[0], peak,
+                       (double)psnr_stream->psnr_sse_total[0]);
+  fprintf(stderr, " %.3f", ovpsnr);
+
+  for (int i = 0; i < 4; i++) {
+    fprintf(stderr, " %.3f",
+            psnr_stream->psnr_totals[0][i] / psnr_stream->psnr_count[0]);
+  }
+  fprintf(stderr, "\n");
+}
+
+static aom::AV1RateControlRtcConfig create_rtc_rc_config(
+    const aom_codec_enc_cfg_t &cfg, const AppInput &app_input) {
+  aom::AV1RateControlRtcConfig rc_cfg;
+  rc_cfg.width = cfg.g_w;
+  rc_cfg.height = cfg.g_h;
+  rc_cfg.max_quantizer = cfg.rc_max_quantizer;
+  rc_cfg.min_quantizer = cfg.rc_min_quantizer;
+  rc_cfg.target_bandwidth = cfg.rc_target_bitrate;
+  rc_cfg.buf_initial_sz = cfg.rc_buf_initial_sz;
+  rc_cfg.buf_optimal_sz = cfg.rc_buf_optimal_sz;
+  rc_cfg.buf_sz = cfg.rc_buf_sz;
+  rc_cfg.overshoot_pct = cfg.rc_overshoot_pct;
+  rc_cfg.undershoot_pct = cfg.rc_undershoot_pct;
+  // This is hardcoded as AOME_SET_MAX_INTRA_BITRATE_PCT
+  rc_cfg.max_intra_bitrate_pct = 300;
+  rc_cfg.framerate = cfg.g_timebase.den;
+  // TODO(jianj): Add suppor for SVC.
+  rc_cfg.ss_number_layers = 1;
+  rc_cfg.ts_number_layers = 1;
+  rc_cfg.scaling_factor_num[0] = 1;
+  rc_cfg.scaling_factor_den[0] = 1;
+  rc_cfg.layer_target_bitrate[0] = static_cast<int>(rc_cfg.target_bandwidth);
+  rc_cfg.max_quantizers[0] = rc_cfg.max_quantizer;
+  rc_cfg.min_quantizers[0] = rc_cfg.min_quantizer;
+  rc_cfg.aq_mode = app_input.aq_mode;
+
+  return rc_cfg;
+}
+
+static int qindex_to_quantizer(int qindex) {
+  // Table that converts 0-63 range Q values passed in outside to the 0-255
+  // range Qindex used internally.
+  static const int quantizer_to_qindex[] = {
+    0,   4,   8,   12,  16,  20,  24,  28,  32,  36,  40,  44,  48,
+    52,  56,  60,  64,  68,  72,  76,  80,  84,  88,  92,  96,  100,
+    104, 108, 112, 116, 120, 124, 128, 132, 136, 140, 144, 148, 152,
+    156, 160, 164, 168, 172, 176, 180, 184, 188, 192, 196, 200, 204,
+    208, 212, 216, 220, 224, 228, 232, 236, 240, 244, 249, 255,
+  };
+  for (int quantizer = 0; quantizer < 64; ++quantizer)
+    if (quantizer_to_qindex[quantizer] >= qindex) return quantizer;
+
+  return 63;
+}
 
 int main(int argc, const char **argv) {
   AppInput app_input;
@@ -1194,7 +1454,7 @@ int main(int argc, const char **argv) {
   int frame_avail;
   int got_data = 0;
   int flags = 0;
-  unsigned i;
+  int i;
   int pts = 0;             // PTS starts at 0.
   int frame_duration = 1;  // 1 timebase tick per frame.
   aom_svc_layer_id_t layer_id;
@@ -1209,7 +1469,6 @@ int main(int argc, const char **argv) {
   }
 #endif
 #if CONFIG_AV1_DECODER
-  int mismatch_seen = 0;
   aom_codec_ctx_t decoder;
 #endif
 
@@ -1222,6 +1481,7 @@ int main(int argc, const char **argv) {
   double framerate = 30.0;
   int use_svc_control = 1;
   int set_err_resil_frame = 0;
+  int test_changing_bitrate = 0;
   zero(rc.layer_target_bitrate);
   memset(&layer_id, 0, sizeof(aom_svc_layer_id_t));
   memset(&app_input, 0, sizeof(AppInput));
@@ -1231,18 +1491,21 @@ int main(int argc, const char **argv) {
   // spatial stream, using the scaling_mode control.
   const int test_dynamic_scaling_single_layer = 0;
 
+  // Flag to test setting speed per layer.
+  const int test_speed_per_layer = 0;
+
   /* Setup default input stream settings */
   app_input.input_ctx.framerate.numerator = 30;
   app_input.input_ctx.framerate.denominator = 1;
   app_input.input_ctx.only_i420 = 0;
-  app_input.input_ctx.bit_depth = 0;
+  app_input.input_ctx.bit_depth = AOM_BITS_8;
   app_input.speed = 7;
   exec_name = argv[0];
 
   // start with default encoder configuration
   aom_codec_err_t res = aom_codec_enc_config_default(aom_codec_av1_cx(), &cfg,
                                                      AOM_USAGE_REALTIME);
-  if (res) {
+  if (res != AOM_CODEC_OK) {
     die("Failed to get config: %s\n", aom_codec_err_to_string(res));
   }
 
@@ -1263,8 +1526,8 @@ int main(int argc, const char **argv) {
 
   parse_command_line(argc, argv, &app_input, &svc_params, &cfg);
 
-  unsigned int ts_number_layers = svc_params.number_temporal_layers;
-  unsigned int ss_number_layers = svc_params.number_spatial_layers;
+  int ts_number_layers = svc_params.number_temporal_layers;
+  int ss_number_layers = svc_params.number_spatial_layers;
 
   unsigned int width = cfg.g_w;
   unsigned int height = cfg.g_h;
@@ -1328,11 +1591,11 @@ int main(int argc, const char **argv) {
   info.time_base.numerator = cfg.g_timebase.num;
   info.time_base.denominator = cfg.g_timebase.den;
   // Open an output file for each stream.
-  for (unsigned int sl = 0; sl < ss_number_layers; ++sl) {
-    for (unsigned tl = 0; tl < ts_number_layers; ++tl) {
+  for (int sl = 0; sl < ss_number_layers; ++sl) {
+    for (int tl = 0; tl < ts_number_layers; ++tl) {
       i = sl * ts_number_layers + tl;
       char file_name[PATH_MAX];
-      snprintf(file_name, sizeof(file_name), "%s_%u.av1",
+      snprintf(file_name, sizeof(file_name), "%s_%d.av1",
                app_input.output_filename, i);
       if (app_input.output_obu) {
         obu_files[i] = fopen(file_name, "wb");
@@ -1356,15 +1619,16 @@ int main(int argc, const char **argv) {
 
   // Initialize codec.
   aom_codec_ctx_t codec;
-  if (aom_codec_enc_init(
-          &codec, encoder, &cfg,
-          cfg.g_input_bit_depth == AOM_BITS_8 ? 0 : AOM_CODEC_USE_HIGHBITDEPTH))
-    die("Failed to initialize encoder");
+  aom_codec_flags_t flag = 0;
+  flag |= cfg.g_input_bit_depth == AOM_BITS_8 ? 0 : AOM_CODEC_USE_HIGHBITDEPTH;
+  flag |= app_input.show_psnr ? AOM_CODEC_USE_PSNR : 0;
+  if (aom_codec_enc_init(&codec, encoder, &cfg, flag))
+    die_codec(&codec, "Failed to initialize encoder");
 
 #if CONFIG_AV1_DECODER
   if (app_input.decode) {
     if (aom_codec_dec_init(&decoder, get_aom_decoder_by_index(0), NULL, 0))
-      die("Failed to initialize decoder");
+      die_codec(&decoder, "Failed to initialize decoder");
   }
 #endif
 
@@ -1392,9 +1656,22 @@ int main(int argc, const char **argv) {
   aom_codec_control(&codec, AV1E_SET_ENABLE_FILTER_INTRA, 0);
   aom_codec_control(&codec, AV1E_SET_INTRA_DEFAULT_TX_ONLY, 1);
 
-  aom_codec_control(&codec, AV1E_SET_TILE_COLUMNS,
-                    cfg.g_threads ? get_msb(cfg.g_threads) : 0);
-  if (cfg.g_threads > 1) aom_codec_control(&codec, AV1E_SET_ROW_MT, 1);
+  if (cfg.g_threads > 1) {
+    aom_codec_control(&codec, AV1E_SET_TILE_COLUMNS,
+                      (unsigned int)log2(cfg.g_threads));
+  }
+
+  aom_codec_control(&codec, AV1E_SET_TUNE_CONTENT, app_input.tune_content);
+  if (app_input.tune_content == AOM_CONTENT_SCREEN) {
+    aom_codec_control(&codec, AV1E_SET_ENABLE_PALETTE, 1);
+    aom_codec_control(&codec, AV1E_SET_ENABLE_CFL_INTRA, 1);
+    // INTRABC is currently disabled for rt mode, as it's too slow.
+    aom_codec_control(&codec, AV1E_SET_ENABLE_INTRABC, 0);
+  }
+
+  if (app_input.use_external_rc) {
+    aom_codec_control(&codec, AV1E_SET_RTC_EXTERNAL_RC, 1);
+  }
 
   aom_codec_control(&codec, AV1E_SET_TUNE_CONTENT, app_input.tune_content);
   if (app_input.tune_content == AOM_CONTENT_SCREEN) {
@@ -1435,17 +1712,26 @@ int main(int argc, const char **argv) {
                       max_intra_size_pct);
   }
 
-  for (unsigned int lx = 0; lx < ts_number_layers * ss_number_layers; lx++) {
+  for (int lx = 0; lx < ts_number_layers * ss_number_layers; lx++) {
     cx_time_layer[lx] = 0;
     frame_cnt_layer[lx] = 0;
   }
 
+  std::unique_ptr<aom::AV1RateControlRTC> rc_api;
+  if (app_input.use_external_rc) {
+    const aom::AV1RateControlRtcConfig rc_cfg =
+        create_rtc_rc_config(cfg, app_input);
+    rc_api = aom::AV1RateControlRTC::Create(rc_cfg);
+  }
+
   frame_avail = 1;
+  struct psnr_stats psnr_stream;
+  memset(&psnr_stream, 0, sizeof(psnr_stream));
   while (frame_avail || got_data) {
     struct aom_usec_timer timer;
     frame_avail = read_frame(&(app_input.input_ctx), &raw);
     // Loop over spatial layers.
-    for (unsigned int slx = 0; slx < ss_number_layers; slx++) {
+    for (int slx = 0; slx < ss_number_layers; slx++) {
       aom_codec_iter_t iter = NULL;
       const aom_codec_cx_pkt_t *pkt;
       int layer = 0;
@@ -1466,6 +1752,24 @@ int main(int argc, const char **argv) {
           aom_codec_control(&codec, AV1E_SET_SVC_REF_FRAME_COMP_PRED,
                             &ref_frame_comp_pred);
         }
+        // Set the speed per layer.
+        if (test_speed_per_layer) {
+          int speed_per_layer = 10;
+          if (layer_id.spatial_layer_id == 0) {
+            if (layer_id.temporal_layer_id == 0) speed_per_layer = 6;
+            if (layer_id.temporal_layer_id == 1) speed_per_layer = 7;
+            if (layer_id.temporal_layer_id == 2) speed_per_layer = 8;
+          } else if (layer_id.spatial_layer_id == 1) {
+            if (layer_id.temporal_layer_id == 0) speed_per_layer = 7;
+            if (layer_id.temporal_layer_id == 1) speed_per_layer = 8;
+            if (layer_id.temporal_layer_id == 2) speed_per_layer = 9;
+          } else if (layer_id.spatial_layer_id == 2) {
+            if (layer_id.temporal_layer_id == 0) speed_per_layer = 8;
+            if (layer_id.temporal_layer_id == 1) speed_per_layer = 9;
+            if (layer_id.temporal_layer_id == 2) speed_per_layer = 10;
+          }
+          aom_codec_control(&codec, AOME_SET_CPUUSED, speed_per_layer);
+        }
       } else {
         // Only up to 3 temporal layers supported in fixed mode.
         // Only need to set spatial and temporal layer_id: reference
@@ -1483,11 +1787,16 @@ int main(int argc, const char **argv) {
         aom_codec_control(&codec, AV1E_SET_SVC_LAYER_ID, &layer_id);
       }
 
-      if (set_err_resil_frame) {
+      if (set_err_resil_frame && cfg.g_error_resilient == 0) {
         // Set error_resilient per frame: off/0 for base layer and
         // on/1 for enhancement layer frames.
-        int err_resil_mode =
-            (layer_id.spatial_layer_id > 0 || layer_id.temporal_layer_id > 0);
+        // Note that this is can only be done on the fly/per-frame/layer
+        // if the config error_resilience is off/0. See the logic for updating
+        // in set_encoder_config():
+        // tool_cfg->error_resilient_mode =
+        //     cfg->g_error_resilient | extra_cfg->error_resilient_mode;
+        const int err_resil_mode =
+            layer_id.spatial_layer_id > 0 || layer_id.temporal_layer_id > 0;
         aom_codec_control(&codec, AV1E_SET_ERROR_RESILIENT_MODE,
                           err_resil_mode);
       }
@@ -1536,6 +1845,38 @@ int main(int argc, const char **argv) {
         }
       }
 
+      // Change target_bitrate every other frame.
+      if (test_changing_bitrate && frame_cnt % 2 == 0) {
+        if (frame_cnt < 500)
+          cfg.rc_target_bitrate += 10;
+        else
+          cfg.rc_target_bitrate -= 10;
+        // Do big increase and decrease.
+        if (frame_cnt == 100) cfg.rc_target_bitrate <<= 1;
+        if (frame_cnt == 600) cfg.rc_target_bitrate >>= 1;
+        if (cfg.rc_target_bitrate < 100) cfg.rc_target_bitrate = 100;
+        // Call change_config, or bypass with new control.
+        // res = aom_codec_enc_config_set(&codec, &cfg);
+        if (aom_codec_control(&codec, AV1E_SET_BITRATE_ONE_PASS_CBR,
+                              cfg.rc_target_bitrate))
+          die_codec(&codec, "Failed to SET_BITRATE_ONE_PASS_CBR");
+      }
+
+      if (rc_api) {
+        aom::AV1FrameParamsRTC frame_params;
+        // TODO(jianj): Add support for SVC.
+        frame_params.spatial_layer_id = 0;
+        frame_params.temporal_layer_id = 0;
+        frame_params.frame_type =
+            is_key_frame ? aom::kKeyFrame : aom::kInterFrame;
+        rc_api->ComputeQP(frame_params);
+        const int current_qp = rc_api->GetQP();
+        if (aom_codec_control(&codec, AV1E_SET_QUANTIZER_ONE_PASS,
+                              qindex_to_quantizer(current_qp))) {
+          die_codec(&codec, "Failed to SET_QUANTIZER_ONE_PASS");
+        }
+      }
+
       // Do the layer encode.
       aom_usec_timer_start(&timer);
       if (aom_codec_encode(&codec, frame_avail ? &raw : NULL, pts, 1, flags))
@@ -1546,39 +1887,47 @@ int main(int argc, const char **argv) {
       frame_cnt_layer[layer] += 1;
 
       got_data = 0;
+      // For simulcast (mode 11): write out each spatial layer to the file.
+      int ss_layers_write = (app_input.layering_mode == 11)
+                                ? layer_id.spatial_layer_id + 1
+                                : ss_number_layers;
       while ((pkt = aom_codec_get_cx_data(&codec, &iter))) {
-        got_data = 1;
         switch (pkt->kind) {
           case AOM_CODEC_CX_FRAME_PKT:
-            for (unsigned int sl = layer_id.spatial_layer_id;
-                 sl < ss_number_layers; ++sl) {
-              for (unsigned tl = layer_id.temporal_layer_id;
-                   tl < ts_number_layers; ++tl) {
-                unsigned int j = sl * ts_number_layers + tl;
+            for (int sl = layer_id.spatial_layer_id; sl < ss_layers_write;
+                 ++sl) {
+              for (int tl = layer_id.temporal_layer_id; tl < ts_number_layers;
+                   ++tl) {
+                int j = sl * ts_number_layers + tl;
                 if (app_input.output_obu) {
                   fwrite(pkt->data.frame.buf, 1, pkt->data.frame.sz,
                          obu_files[j]);
                 } else {
-                  aom_video_writer_write_frame(outfile[j], pkt->data.frame.buf,
-                                               pkt->data.frame.sz, pts);
+                  aom_video_writer_write_frame(
+                      outfile[j],
+                      reinterpret_cast<const uint8_t *>(pkt->data.frame.buf),
+                      pkt->data.frame.sz, pts);
                 }
-                if (sl == (unsigned int)layer_id.spatial_layer_id)
+                if (sl == layer_id.spatial_layer_id)
                   rc.layer_encoding_bitrate[j] += 8.0 * pkt->data.frame.sz;
               }
             }
+            got_data = 1;
             // Write everything into the top layer.
             if (app_input.output_obu) {
               fwrite(pkt->data.frame.buf, 1, pkt->data.frame.sz,
                      total_layer_obu_file);
             } else {
-              aom_video_writer_write_frame(total_layer_file,
-                                           pkt->data.frame.buf,
-                                           pkt->data.frame.sz, pts);
+              aom_video_writer_write_frame(
+                  total_layer_file,
+                  reinterpret_cast<const uint8_t *>(pkt->data.frame.buf),
+                  pkt->data.frame.sz, pts);
             }
             // Keep count of rate control stats per layer (for non-key).
             if (!(pkt->data.frame.flags & AOM_FRAME_IS_KEY)) {
-              unsigned int j = layer_id.spatial_layer_id * ts_number_layers +
-                               layer_id.temporal_layer_id;
+              int j = layer_id.spatial_layer_id * ts_number_layers +
+                      layer_id.temporal_layer_id;
+              assert(j >= 0);
               rc.layer_avg_frame_size[j] += 8.0 * pkt->data.frame.sz;
               rc.layer_avg_rate_mismatch[j] +=
                   fabs(8.0 * pkt->data.frame.sz - rc.layer_pfb[j]) /
@@ -1586,6 +1935,9 @@ int main(int argc, const char **argv) {
               if (slx == 0) ++rc.layer_enc_frames[layer_id.temporal_layer_id];
             }
 
+            if (rc_api) {
+              rc_api->PostEncodeUpdate(pkt->data.frame.sz);
+            }
             // Update for short-time encoding bitrate states, for moving window
             // of size rc->window, shifted by rc->window / 2.
             // Ignore first window segment, due to key frame.
@@ -1619,24 +1971,43 @@ int main(int argc, const char **argv) {
 
 #if CONFIG_AV1_DECODER
             if (app_input.decode) {
-              if (aom_codec_decode(&decoder, pkt->data.frame.buf,
-                                   (unsigned int)pkt->data.frame.sz, NULL))
-                die_codec(&decoder, "Failed to decode frame.");
+              if (aom_codec_decode(
+                      &decoder,
+                      reinterpret_cast<const uint8_t *>(pkt->data.frame.buf),
+                      pkt->data.frame.sz, NULL))
+                die_codec(&decoder, "Failed to decode frame");
             }
 #endif
 
+            break;
+          case AOM_CODEC_PSNR_PKT:
+            if (app_input.show_psnr) {
+              psnr_stream.psnr_sse_total[0] += pkt->data.psnr.sse[0];
+              psnr_stream.psnr_samples_total[0] += pkt->data.psnr.samples[0];
+              for (int plane = 0; plane < 4; plane++) {
+                psnr_stream.psnr_totals[0][plane] += pkt->data.psnr.psnr[plane];
+              }
+              psnr_stream.psnr_count[0]++;
+            }
             break;
           default: break;
         }
       }
 #if CONFIG_AV1_DECODER
-      if (app_input.decode) {
+      if (got_data && app_input.decode) {
         // Don't look for mismatch on top spatial and top temporal layers as
         // they are non reference frames.
         if ((ss_number_layers > 1 || ts_number_layers > 1) &&
             !(layer_id.temporal_layer_id > 0 &&
-              layer_id.temporal_layer_id == (int)ts_number_layers - 1)) {
-          test_decode(&codec, &decoder, frame_cnt, &mismatch_seen);
+              layer_id.temporal_layer_id == ts_number_layers - 1)) {
+          if (test_decode(&codec, &decoder, frame_cnt)) {
+#if CONFIG_INTERNAL_STATS
+            fprintf(stats_file, "First mismatch occurred in frame %d\n",
+                    frame_cnt);
+            fclose(stats_file);
+#endif
+            fatal("Mismatch seen");
+          }
         }
       }
 #endif
@@ -1650,8 +2021,8 @@ int main(int argc, const char **argv) {
                                 ts_number_layers);
 
   printf("\n");
-  for (unsigned int slx = 0; slx < ss_number_layers; slx++)
-    for (unsigned int tlx = 0; tlx < ts_number_layers; tlx++) {
+  for (int slx = 0; slx < ss_number_layers; slx++)
+    for (int tlx = 0; tlx < ts_number_layers; tlx++) {
       int lx = slx * ts_number_layers + tlx;
       printf("Per layer encoding time/FPS stats for encoder: %d %d %d %f %f \n",
              slx, tlx, frame_cnt_layer[lx],
@@ -1664,14 +2035,21 @@ int main(int argc, const char **argv) {
          frame_cnt, 1000 * (float)cx_time / (double)(frame_cnt * 1000000),
          1000000 * (double)frame_cnt / (double)cx_time);
 
-  if (aom_codec_destroy(&codec)) die_codec(&codec, "Failed to destroy codec");
+  if (app_input.show_psnr) {
+    show_psnr(&psnr_stream, 255.0);
+  }
+
+  if (aom_codec_destroy(&codec)) die_codec(&codec, "Failed to destroy encoder");
+
+#if CONFIG_AV1_DECODER
+  if (app_input.decode) {
+    if (aom_codec_destroy(&decoder))
+      die_codec(&decoder, "Failed to destroy decoder");
+  }
+#endif
 
 #if CONFIG_INTERNAL_STATS
-  if (mismatch_seen) {
-    fprintf(stats_file, "First mismatch occurred in frame %d\n", mismatch_seen);
-  } else {
-    fprintf(stats_file, "No mismatch detected in recon buffers\n");
-  }
+  fprintf(stats_file, "No mismatch detected in recon buffers\n");
   fclose(stats_file);
 #endif
 

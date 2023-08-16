@@ -150,7 +150,7 @@ static void compute_avg_log_variance(const AV1_COMP *const cpi, MACROBLOCK *x,
             x->plane[0].src.buf + i * x->plane[0].src.stride + j,
             x->plane[0].src.stride, is_hbd);
         block_4x4_var_info->var = src_var;
-        log_src_var = log(1.0 + src_var / 16.0);
+        log_src_var = log1p(src_var / 16.0);
         block_4x4_var_info->log_var = log_src_var;
       } else {
         // When source variance is already calculated and available for
@@ -158,7 +158,7 @@ static void compute_avg_log_variance(const AV1_COMP *const cpi, MACROBLOCK *x,
         // available, then retrieve from buffer. Else, calculate the same and
         // store to the buffer.
         if (log_src_var < 0) {
-          log_src_var = log(1.0 + src_var / 16.0);
+          log_src_var = log1p(src_var / 16.0);
           block_4x4_var_info->log_var = log_src_var;
         }
       }
@@ -168,7 +168,7 @@ static void compute_avg_log_variance(const AV1_COMP *const cpi, MACROBLOCK *x,
           cpi->ppi->fn_ptr[BLOCK_4X4].vf,
           xd->plane[0].dst.buf + i * xd->plane[0].dst.stride + j,
           xd->plane[0].dst.stride, is_hbd);
-      *avg_log_recon_variance += log(1.0 + recon_var / 16.0);
+      *avg_log_recon_variance += log1p(recon_var / 16.0);
     }
   }
 
@@ -1169,9 +1169,13 @@ static AOM_INLINE int intra_block_yrd(const AV1_COMP *const cpi, MACROBLOCK *x,
   MACROBLOCKD *const xd = &x->e_mbd;
   MB_MODE_INFO *const mbmi = xd->mi[0];
   RD_STATS rd_stats;
-  // In order to improve txfm search avoid rd based breakouts during winner
-  // mode evaluation. Hence passing ref_best_rd as a maximum value
-  av1_pick_uniform_tx_size_type_yrd(cpi, x, &rd_stats, bsize, INT64_MAX);
+  // In order to improve txfm search, avoid rd based breakouts during winner
+  // mode evaluation. Hence passing ref_best_rd as INT64_MAX by default when the
+  // speed feature use_rd_based_breakout_for_intra_tx_search is disabled.
+  int64_t ref_best_rd = cpi->sf.tx_sf.use_rd_based_breakout_for_intra_tx_search
+                            ? *best_rd
+                            : INT64_MAX;
+  av1_pick_uniform_tx_size_type_yrd(cpi, x, &rd_stats, bsize, ref_best_rd);
   if (rd_stats.rate == INT_MAX) return 0;
   int this_rate_tokenonly = rd_stats.rate;
   if (!xd->lossless[mbmi->segment_id] && block_signals_txsize(mbmi->bsize)) {

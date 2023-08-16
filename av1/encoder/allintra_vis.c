@@ -225,7 +225,7 @@ static int rate_estimator(const tran_low_t *qcoeff, int eob, TX_SIZE tx_size) {
 
   for (int idx = 0; idx < eob; ++idx) {
     int abs_level = abs(qcoeff[scan_order->scan[idx]]);
-    rate_cost += (int)(log(abs_level + 1.0) / log(2.0)) + 1 + (abs_level > 0);
+    rate_cost += (int)(log1p(abs_level) / log(2.0)) + 1 + (abs_level > 0);
   }
 
   return (rate_cost << AV1_PROB_COST_SHIFT);
@@ -587,7 +587,10 @@ void av1_set_mb_wiener_variance(AV1_COMP *cpi) {
   intra_mt->intra_sync_read_ptr = av1_row_mt_sync_read_dummy;
   intra_mt->intra_sync_write_ptr = av1_row_mt_sync_write_dummy;
   // Calculate differential contrast for each block for the entire image.
-  if (num_workers > 1) {
+  // TODO(chengchen): properly accumulate the distortion and rate in
+  // av1_calc_mb_wiener_var_mt(). Until then, call calc_mb_wiener_var() if
+  // auto_intra_tools_off is true.
+  if (num_workers > 1 && !cpi->oxcf.intra_mode_cfg.auto_intra_tools_off) {
     intra_mt->intra_sync_read_ptr = av1_row_mt_sync_read;
     intra_mt->intra_sync_write_ptr = av1_row_mt_sync_write;
     av1_calc_mb_wiener_var_mt(cpi, num_workers, &sum_rec_distortion,

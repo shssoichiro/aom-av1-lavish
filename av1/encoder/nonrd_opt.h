@@ -50,7 +50,6 @@ typedef struct {
   MOTION_MODE best_motion_mode;
   WarpedMotionParams wm_params;
   int num_proj_ref;
-  uint8_t blk_skip[MAX_MIB_SIZE * MAX_MIB_SIZE / 4];
   PALETTE_MODE_INFO pmi;
   int64_t best_sse;
 } BEST_PICKMODE;
@@ -542,9 +541,10 @@ static INLINE void store_coding_context_nonrd(MACROBLOCK *x,
 }
 
 void av1_block_yrd(MACROBLOCK *x, RD_STATS *this_rdc, int *skippable,
-                   BLOCK_SIZE bsize, TX_SIZE tx_size, int is_inter_mode);
+                   BLOCK_SIZE bsize, TX_SIZE tx_size);
 
-void av1_block_yrd_idtx(MACROBLOCK *x, RD_STATS *this_rdc, int *skippable,
+void av1_block_yrd_idtx(MACROBLOCK *x, const uint8_t *const pred_buf,
+                        int pred_stride, RD_STATS *this_rdc, int *skippable,
                         BLOCK_SIZE bsize, TX_SIZE tx_size);
 
 int64_t av1_model_rd_for_sb_uv(AV1_COMP *cpi, BLOCK_SIZE plane_bsize,

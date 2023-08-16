@@ -492,7 +492,8 @@ enum aome_enc_control_id {
    *
    *  - AOM_CONTENT_DEFAULT = Regular video content (default)
    *  - AOM_CONTENT_SCREEN  = Screen capture content
-   *  - AOM_CONTENT_DEFAULT_NO_SCREEN = Regular video content without screen content tools
+   *  - AOM_CONTENT_DEFAULT_NO_SCREEN = Regular video content without screen
+   * content tools
    *  - AOM_CONTENT_FILM = Film content
    *  - AOM_CONTENT_PSY = Psychovisual optimizations for video
    *  - AOM_CONTENT_ANIMATION = Psychovisual optimizations for complex animation
@@ -619,11 +620,14 @@ enum aome_enc_control_id {
    * point (OP), int parameter
    * Possible values are in the form of "ABxy".
    *  - AB: OP index.
-   *  - xy: Target level index for the OP. Can be values 0~27 (corresponding to
-   *    level 2.0 ~ 8.3, note levels 2.2, 2.3, 3.2, 3.3, 4.2 & 4.3 are
-   *    undefined, and that levels 7.x and 8.x are in draft status), 31
-   *    (maximum parameters level, no level-based constraints) or 32 (keep
-   *    level stats only for level monitoring).
+   *  - xy: Target level index for the OP. Possible values are:
+   *    + 0~27: corresponding to level 2.0 ~ 8.3. Note:
+   *      > Levels 2.2 (2), 2.3 (3), 3.2 (6), 3.3 (7), 4.2 (10) & 4.3 (11) are
+   *        undefined.
+   *      > Levels 7.x and 8.x (20~27) are in draft status, available under the
+   *        config flag CONFIG_CWG_C013.
+   *    + 31: maximum parameters level, no level-based constraints.
+   *    + 32: keep level stats only for level monitoring.
    *
    * E.g.:
    * - "0" means target level index 0 (2.0) for the 0th OP;
@@ -1454,15 +1458,19 @@ enum aome_enc_control_id {
    */
   AV1E_GET_TARGET_SEQ_LEVEL_IDX = 155,
 
-  // ClybPatch -- TODO: Ideally, this should be reworked to be able to be successfully patched without needing to be touched every time there's a new param by other developers.
+  // ClybPatch -- TODO: Ideally, this should be reworked to be able to be
+  // successfully patched without needing to be touched every time there's a new
+  // param by other developers.
   AOME_SET_DQ_MODULATE = AV1E_GET_TARGET_SEQ_LEVEL_IDX + 12,
-  /*!\ClybPatch -- brief Codec control function to set the quantization sharpness parameter,
-   * unsigned int parameter.
+  /*!\ClybPatch -- brief Codec control function to set the quantization
+   * sharpness parameter, unsigned int parameter.
    *
-   * Valid range: 0..7. The default is 0. Values 1-7 will change quantization in favour of block sharpness.
+   * Valid range: 0..7. The default is 0. Values 1-7 will change quantization in
+   * favour of block sharpness.
    */
   AOME_SET_QUANT_SHARPNESS = AV1E_GET_TARGET_SEQ_LEVEL_IDX + 13,
-  // ClybPatch -- Idea thanks to Opmox, sets the TPL model's strength / effectiveness.
+  // ClybPatch -- Idea thanks to Opmox, sets the TPL model's strength /
+  // effectiveness.
   AOME_SET_DELTA_QINDEX_MULT = AV1E_GET_TARGET_SEQ_LEVEL_IDX + 14,
 
   AOME_SET_DELTA_QINDEX_MULT_POS = AOME_SET_DELTA_QINDEX_MULT + 1,
@@ -1486,7 +1494,8 @@ enum aome_enc_control_id {
   // ClybPatch -- Force instance of vmaf preprocessing
   AOME_SET_VMAF_PREPROCESSING = AOME_SET_DELTA_QINDEX_MULT + 8,
 
-  //AOME_SET_BUTTERAUGLI_RDO_BSIZE = AOME_SET_DELTA_QINDEX_MULT + 9, // TODO: Re-add resize factor later
+  // AOME_SET_BUTTERAUGLI_RDO_BSIZE = AOME_SET_DELTA_QINDEX_MULT + 9, // TODO:
+  // Re-add resize factor later
 
   AOME_SET_BUTTERAUGLI_INTENSITY_TARGET = AOME_SET_DELTA_QINDEX_MULT + 10,
 
@@ -1513,7 +1522,7 @@ enum aome_enc_control_id {
   AOME_SET_BUTTERAUGLI_LOOP_COUNT = AOME_SET_DELTA_QINDEX_MULT + 21,
 
   AOME_SET_BUTTERAUGLI_QUANT_MULT_POS = AOME_SET_DELTA_QINDEX_MULT + 22,
-  
+
   AOME_SET_BUTTERAUGLI_QUANT_MULT_NEG = AOME_SET_DELTA_QINDEX_MULT + 23,
 
   /*!\brief Codec control function to get the number of operating points. int*
@@ -1574,6 +1583,19 @@ enum aome_enc_control_id {
    * \attention This feature requires --enable-rate-guide-deltaq=1.
    */
   AV1E_SET_RATE_DISTRIBUTION_INFO = 161,
+
+  /*!\brief Codec control to get the CDEF strength for Y / luma plane.
+   * Returns an array of CDEF_MAX_STRENGTHS.
+   */
+  AV1E_GET_LUMA_CDEF_STRENGTH = 162,
+
+  /*!\brief Codec control to set the target bitrate in kilobits per second,
+   * unsigned int parameter. For 1 pass CBR mode, single layer encoding.
+   * This controls replaces the call aom_codec_enc_config_set(&codec, &cfg)
+   * when only target bitrate is changed, and so is much cheaper as it
+   * bypasses a lot of unneeded code checks.
+   */
+  AV1E_SET_BITRATE_ONE_PASS_CBR = 163,
 
   // Any new encoder control IDs should be added above.
   // Maximum allowed encoder control ID is 229.
@@ -1722,6 +1744,9 @@ typedef struct aom_svc_layer_id {
  * the index for spatial layer `sl` and temporal layer `tl` is
  * sl * number_temporal_layers + tl.
  *
+ * In the arrays of size AOM_MAX_LAYERS, the index for spatial layer `sl` and
+ * temporal layer `tl` is sl * number_temporal_layers + tl.
+ *
  */
 typedef struct aom_svc_params {
   int number_spatial_layers;                 /**< Number of spatial layers */
@@ -1738,10 +1763,10 @@ typedef struct aom_svc_params {
 
 /*!brief Parameters for setting ref frame config */
 typedef struct aom_svc_ref_frame_config {
-  // 7 references: LAST_FRAME (0), LAST2_FRAME(1), LAST3_FRAME(2),
-  // GOLDEN_FRAME(3), BWDREF_FRAME(4), ALTREF2_FRAME(5), ALTREF_FRAME(6).
+  // 7 references: The index 0 - 6 refers to the references:
+  // last(0), last2(1), last3(2), golden(3), bwdref(4), altref2(5), altref(6).
   int reference[7]; /**< Reference flag for each of the 7 references. */
-  /*! Buffer slot index for each of 7 references. */
+  /*! Buffer slot index for each of 7 references indexed above. */
   int ref_idx[7];
   int refresh[8]; /**< Refresh flag for each of the 8 slots. */
 } aom_svc_ref_frame_config_t;
@@ -2172,12 +2197,6 @@ AOM_CTRL_USE_TYPE(AV1E_SET_DV_COST_UPD_FREQ, unsigned int)
 AOM_CTRL_USE_TYPE(AV1E_SET_PARTITION_INFO_PATH, const char *)
 #define AOM_CTRL_AV1E_SET_PARTITION_INFO_PATH
 
-AOM_CTRL_USE_TYPE(AV1E_ENABLE_RATE_GUIDE_DELTAQ, unsigned int)
-#define AOM_CTRL_AV1E_ENABLE_RATE_GUIDE_DELTAQ
-
-AOM_CTRL_USE_TYPE(AV1E_SET_RATE_DISTRIBUTION_INFO, const char *)
-#define AOM_CTRL_AV1E_SET_RATE_DISTRIBUTION_INFO
-
 AOM_CTRL_USE_TYPE(AV1E_SET_EXTERNAL_PARTITION, aom_ext_part_funcs_t *)
 #define AOM_CTRL_AV1E_SET_EXTERNAL_PARTITION
 
@@ -2300,6 +2319,18 @@ AOM_CTRL_USE_TYPE(AV1E_ENABLE_SB_QP_SWEEP, unsigned int)
 
 AOM_CTRL_USE_TYPE(AV1E_SET_QUANTIZER_ONE_PASS, int)
 #define AOM_CTRL_AV1E_SET_QUANTIZER_ONE_PASS
+
+AOM_CTRL_USE_TYPE(AV1E_ENABLE_RATE_GUIDE_DELTAQ, unsigned int)
+#define AOM_CTRL_AV1E_ENABLE_RATE_GUIDE_DELTAQ
+
+AOM_CTRL_USE_TYPE(AV1E_SET_RATE_DISTRIBUTION_INFO, const char *)
+#define AOM_CTRL_AV1E_SET_RATE_DISTRIBUTION_INFO
+
+AOM_CTRL_USE_TYPE(AV1E_GET_LUMA_CDEF_STRENGTH, int *)
+#define AOM_CTRL_AV1E_GET_LUMA_CDEF_STRENGTH
+
+AOM_CTRL_USE_TYPE(AV1E_SET_BITRATE_ONE_PASS_CBR, unsigned int)
+#define AOM_CTRL_AV1E_SET_BITRATE_ONE_PASS_CBR
 
 /*!\endcond */
 /*! @} - end defgroup aom_encoder */

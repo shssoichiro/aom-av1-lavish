@@ -41,7 +41,7 @@ class BlendA64MaskTest : public FunctionEquivalenceTest<BlendA64Func> {
   static const int kMaxMaskWidth = 2 * MAX_SB_SIZE;
   static const int kMaxMaskSize = kMaxMaskWidth * kMaxMaskWidth;
 
-  virtual ~BlendA64MaskTest() {}
+  ~BlendA64MaskTest() override = default;
 
   virtual void Execute(const SrcPixel *p_src0, const SrcPixel *p_src1,
                        int run_times) = 0;
@@ -163,7 +163,8 @@ typedef libaom_test::FuncParam<F8B> TestFuncs;
 
 class BlendA64MaskTest8B : public BlendA64MaskTest<F8B, uint8_t, uint8_t> {
  protected:
-  void Execute(const uint8_t *p_src0, const uint8_t *p_src1, int run_times) {
+  void Execute(const uint8_t *p_src0, const uint8_t *p_src1,
+               int run_times) override {
     aom_usec_timer timer;
     aom_usec_timer_start(&timer);
     for (int i = 0; i < run_times; ++i) {
@@ -258,6 +259,12 @@ INSTANTIATE_TEST_SUITE_P(AVX2, BlendA64MaskTest8B,
                                                      aom_blend_a64_mask_avx2)));
 #endif  // HAVE_AVX2
 
+#if HAVE_NEON
+INSTANTIATE_TEST_SUITE_P(NEON, BlendA64MaskTest8B,
+                         ::testing::Values(TestFuncs(aom_blend_a64_mask_c,
+                                                     aom_blend_a64_mask_neon)));
+#endif  // HAVE_NEON
+
 //////////////////////////////////////////////////////////////////////////////
 // 8 bit _d16 version
 //////////////////////////////////////////////////////////////////////////////
@@ -275,7 +282,8 @@ class BlendA64MaskTest8B_d16
   // max number of bits used by the source
   static const int kSrcMaxBitsMask = 0x3fff;
 
-  void Execute(const uint16_t *p_src0, const uint16_t *p_src1, int run_times) {
+  void Execute(const uint16_t *p_src0, const uint16_t *p_src1,
+               int run_times) override {
     ConvolveParams conv_params;
     conv_params.round_0 = ROUND0_BITS;
     conv_params.round_1 = COMPOUND_ROUND1_BITS;
@@ -377,7 +385,8 @@ typedef libaom_test::FuncParam<FHBD> TestFuncsHBD;
 
 class BlendA64MaskTestHBD : public BlendA64MaskTest<FHBD, uint16_t, uint16_t> {
  protected:
-  void Execute(const uint16_t *p_src0, const uint16_t *p_src1, int run_times) {
+  void Execute(const uint16_t *p_src0, const uint16_t *p_src1,
+               int run_times) override {
     aom_usec_timer timer;
     aom_usec_timer_start(&timer);
     for (int i = 0; i < run_times; ++i) {
@@ -466,6 +475,13 @@ INSTANTIATE_TEST_SUITE_P(
                                    aom_highbd_blend_a64_mask_sse4_1)));
 #endif  // HAVE_SSE4_1
 
+#if HAVE_NEON
+INSTANTIATE_TEST_SUITE_P(
+    NEON, BlendA64MaskTestHBD,
+    ::testing::Values(TestFuncsHBD(aom_highbd_blend_a64_mask_c,
+                                   aom_highbd_blend_a64_mask_neon)));
+#endif  // HAVE_NEON
+
 //////////////////////////////////////////////////////////////////////////////
 // HBD _d16 version
 //////////////////////////////////////////////////////////////////////////////
@@ -485,7 +501,8 @@ class BlendA64MaskTestHBD_d16
   static const int kSrcMaxBitsMask = (1 << 14) - 1;
   static const int kSrcMaxBitsMaskHBD = (1 << 16) - 1;
 
-  void Execute(const uint16_t *p_src0, const uint16_t *p_src1, int run_times) {
+  void Execute(const uint16_t *p_src0, const uint16_t *p_src1,
+               int run_times) override {
     ASSERT_GT(run_times, 0) << "Cannot run 0 iterations of the test.";
     ConvolveParams conv_params;
     conv_params.round_0 = (bit_depth_ == 12) ? ROUND0_BITS + 2 : ROUND0_BITS;

@@ -123,7 +123,7 @@ static AOM_FORCE_INLINE void update_yrd_loop_vars_hbd(
  * coefficients for Hadamard transform
  */
 void av1_block_yrd(MACROBLOCK *x, RD_STATS *this_rdc, int *skippable,
-                   BLOCK_SIZE bsize, TX_SIZE tx_size, int is_inter_mode) {
+                   BLOCK_SIZE bsize, TX_SIZE tx_size) {
   MACROBLOCKD *xd = &x->e_mbd;
   const struct macroblockd_plane *pd = &xd->plane[AOM_PLANE_Y];
   struct macroblock_plane *const p = &x->plane[AOM_PLANE_Y];
@@ -143,11 +143,6 @@ void av1_block_yrd(MACROBLOCK *x, RD_STATS *this_rdc, int *skippable,
   const int bh = 4 * num_4x4_h;
   const int use_hbd = is_cur_buf_hbd(xd);
   int num_blk_skip_w = num_4x4_w;
-  int sh_blk_skip = 0;
-  if (is_inter_mode) {
-    num_blk_skip_w = num_4x4_w >> 1;
-    sh_blk_skip = 1;
-  }
 
 #if CONFIG_AV1_HIGHBITDEPTH
   if (use_hbd) {
@@ -303,12 +298,12 @@ void av1_block_yrd(MACROBLOCK *x, RD_STATS *this_rdc, int *skippable,
       if (use_hbd)
         update_yrd_loop_vars_hbd(x, &temp_skippable, step, *eob, coeff, qcoeff,
                                  dqcoeff, this_rdc, &eob_cost,
-                                 (r * num_blk_skip_w + c) >> sh_blk_skip);
+                                 r * num_blk_skip_w + c);
       else
 #endif
         update_yrd_loop_vars(x, &temp_skippable, step, *eob, low_coeff,
                              low_qcoeff, low_dqcoeff, this_rdc, &eob_cost,
-                             (r * num_blk_skip_w + c) >> sh_blk_skip);
+                             r * num_blk_skip_w + c);
     }
     block += row_step;
   }
@@ -372,6 +367,8 @@ static AOM_INLINE void scale_square_buf_vals(int16_t *dst, int tx_width,
  * uses low-precision set of functions (16-bit) and 32 bit for high bit depth
  * \param[in]    x              Pointer to structure holding all the data for
                                 the current macroblock
+ * \param[in]    pred_buf       Pointer to the prediction buffer
+ * \param[in]    pred_stride    Stride for the prediction buffer
  * \param[in]    this_rdc       Pointer to calculated RD Cost
  * \param[in]    skippable      Pointer to a flag indicating possible tx skip
  * \param[in]    bsize          Current block size
@@ -380,10 +377,10 @@ static AOM_INLINE void scale_square_buf_vals(int16_t *dst, int tx_width,
  * \remark Nothing is returned. Instead, calculated RD cost is placed to
  * \c this_rdc. \c skippable flag is set if all coefficients are zero.
  */
-void av1_block_yrd_idtx(MACROBLOCK *x, RD_STATS *this_rdc, int *skippable,
+void av1_block_yrd_idtx(MACROBLOCK *x, const uint8_t *const pred_buf,
+                        int pred_stride, RD_STATS *this_rdc, int *skippable,
                         BLOCK_SIZE bsize, TX_SIZE tx_size) {
   MACROBLOCKD *xd = &x->e_mbd;
-  const struct macroblockd_plane *pd = &xd->plane[AOM_PLANE_Y];
   struct macroblock_plane *const p = &x->plane[AOM_PLANE_Y];
   assert(bsize < BLOCK_SIZES_ALL);
   const int num_4x4_w = mi_size_wide[bsize];
@@ -397,8 +394,7 @@ void av1_block_yrd_idtx(MACROBLOCK *x, RD_STATS *this_rdc, int *skippable,
   int eob_cost = 0;
   const int bw = 4 * num_4x4_w;
   const int bh = 4 * num_4x4_h;
-  const int num_blk_skip_w = num_4x4_w >> 1;
-  const int sh_blk_skip = 1;
+  const int num_blk_skip_w = num_4x4_w;
   // Keep the intermediate value on the stack here. Writing directly to
   // skippable causes speed regression due to load-and-store issues in
   // update_yrd_loop_vars.
@@ -431,7 +427,7 @@ void av1_block_yrd_idtx(MACROBLOCK *x, RD_STATS *this_rdc, int *skippable,
   this_rdc->dist = 0;
   this_rdc->rate = 0;
   aom_subtract_block(bh, bw, p->src_diff, bw, p->src.buf, p->src.stride,
-                     pd->dst.buf, pd->dst.stride);
+                     pred_buf, pred_stride);
   // Keep track of the row and column of the blocks we use so that we know
   // if we are in the unrestricted motion border.
   DECLARE_BLOCK_YRD_BUFFERS()
@@ -446,7 +442,7 @@ void av1_block_yrd_idtx(MACROBLOCK *x, RD_STATS *this_rdc, int *skippable,
       assert(*eob <= 1024);
       update_yrd_loop_vars(x, &temp_skippable, step, *eob, low_coeff,
                            low_qcoeff, low_dqcoeff, this_rdc, &eob_cost,
-                           (r * num_blk_skip_w + c) >> sh_blk_skip);
+                           r * num_blk_skip_w + c);
     }
   }
   this_rdc->skip_txfm = *skippable = temp_skippable;
@@ -660,7 +656,7 @@ void av1_estimate_block_intra(int plane, int block, int row, int col,
 
   if (plane == 0) {
     av1_block_yrd(x, &this_rdc, &args->skippable, bsize_tx,
-                  AOMMIN(tx_size, TX_16X16), 0);
+                  AOMMIN(tx_size, TX_16X16));
   } else {
     av1_model_rd_for_sb_uv(cpi, bsize_tx, x, xd, &this_rdc, plane, plane);
   }
@@ -873,7 +869,7 @@ void av1_estimate_intra_mode(AV1_COMP *cpi, MACROBLOCK *x, BLOCK_SIZE bsize,
     mi->tx_size = intra_tx_size;
     compute_intra_yprediction(cm, this_mode, bsize, x, xd);
     // Look into selecting tx_size here, based on prediction residual.
-    av1_block_yrd(x, &this_rdc, &args.skippable, bsize, mi->tx_size, 0);
+    av1_block_yrd(x, &this_rdc, &args.skippable, bsize, mi->tx_size);
     // TODO(kyslov@) Need to account for skippable
     if (x->color_sensitivity[COLOR_SENS_IDX(AOM_PLANE_U)]) {
       av1_foreach_transformed_block_in_plane(xd, uv_bsize, AOM_PLANE_U,
@@ -922,14 +918,16 @@ void av1_estimate_intra_mode(AV1_COMP *cpi, MACROBLOCK *x, BLOCK_SIZE bsize,
       best_pickmode->best_ref_frame = INTRA_FRAME;
       best_pickmode->best_second_ref_frame = NONE;
       best_pickmode->best_mode_skip_txfm = this_rdc.skip_txfm;
-      if (!this_rdc.skip_txfm) {
-        memcpy(ctx->blk_skip, x->txfm_search_info.blk_skip,
-               sizeof(x->txfm_search_info.blk_skip[0]) * ctx->num_4x4_blk);
-      }
       mi->uv_mode = this_mode;
       mi->mv[0].as_int = INVALID_MV;
       mi->mv[1].as_int = INVALID_MV;
+      if (!this_rdc.skip_txfm)
+        memset(ctx->blk_skip, 0,
+               sizeof(x->txfm_search_info.blk_skip[0]) * ctx->num_4x4_blk);
     }
   }
+  if (best_pickmode->best_ref_frame == INTRA_FRAME)
+    memset(ctx->blk_skip, 0,
+           sizeof(x->txfm_search_info.blk_skip[0]) * ctx->num_4x4_blk);
   mi->tx_size = best_pickmode->best_tx_size;
 }

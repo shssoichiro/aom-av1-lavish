@@ -74,7 +74,10 @@ static AOM_TOOLS_FORMAT_PRINTF(3, 0) void warn_or_exit_on_errorv(
 
     if (detail) fprintf(stderr, "    %s\n", detail);
 
-    if (fatal) exit(EXIT_FAILURE);
+    if (fatal) {
+      aom_codec_destroy(ctx);
+      exit(EXIT_FAILURE);
+    }
   }
 }
 
@@ -125,153 +128,81 @@ static int fourcc_is_ivf(const char detect[4]) {
   return 0;
 }
 
-static const int av1_arg_ctrl_map[] = { AOME_SET_CPUUSED,
-                                        AOME_SET_ENABLEAUTOALTREF,
-                                        AOME_SET_SHARPNESS,
-                                        AOME_SET_QUANT_SHARPNESS,
-                                        AOME_SET_STATIC_THRESHOLD,
-                                        AV1E_SET_ROW_MT,
-                                        AV1E_SET_FP_MT,
-                                        AV1E_SET_TILE_COLUMNS,
-                                        AV1E_SET_TILE_ROWS,
-                                        AV1E_SET_ENABLE_TPL_MODEL,
-                                        AV1E_SET_ENABLE_KEYFRAME_FILTERING,
-                                        AOME_SET_ARNR_MAXFRAMES,
-                                        AOME_SET_ARNR_STRENGTH,
-                                        AOME_SET_TUNING,
-                                        AOME_SET_CQ_LEVEL,
-                                        AOME_SET_MAX_INTRA_BITRATE_PCT,
-                                        AV1E_SET_MAX_INTER_BITRATE_PCT,
-                                        AV1E_SET_GF_CBR_BOOST_PCT,
-                                        AV1E_SET_LOSSLESS,
-                                        AV1E_SET_ENABLE_CDEF,
-                                        AV1E_SET_ENABLE_RESTORATION,
-                                        AV1E_SET_ENABLE_RECT_PARTITIONS,
-                                        AV1E_SET_ENABLE_AB_PARTITIONS,
-                                        AV1E_SET_ENABLE_1TO4_PARTITIONS,
-                                        AV1E_SET_MIN_PARTITION_SIZE,
-                                        AV1E_SET_MAX_PARTITION_SIZE,
-                                        AV1E_SET_ENABLE_DUAL_FILTER,
-                                        AV1E_SET_ENABLE_CHROMA_DELTAQ,
-                                        AV1E_SET_ENABLE_INTRA_EDGE_FILTER,
-                                        AV1E_SET_ENABLE_ORDER_HINT,
-                                        AV1E_SET_ENABLE_TX64,
-                                        AV1E_SET_ENABLE_FLIP_IDTX,
-                                        AV1E_SET_ENABLE_RECT_TX,
-                                        AV1E_SET_ENABLE_DIST_WTD_COMP,
-                                        AV1E_SET_ENABLE_MASKED_COMP,
-                                        AV1E_SET_ENABLE_ONESIDED_COMP,
-                                        AV1E_SET_ENABLE_INTERINTRA_COMP,
-                                        AV1E_SET_ENABLE_SMOOTH_INTERINTRA,
-                                        AV1E_SET_ENABLE_DIFF_WTD_COMP,
-                                        AV1E_SET_ENABLE_INTERINTER_WEDGE,
-                                        AV1E_SET_ENABLE_INTERINTRA_WEDGE,
-                                        AV1E_SET_ENABLE_GLOBAL_MOTION,
-                                        AV1E_SET_ENABLE_WARPED_MOTION,
-                                        AV1E_SET_ENABLE_FILTER_INTRA,
-                                        AV1E_SET_ENABLE_SMOOTH_INTRA,
-                                        AV1E_SET_ENABLE_PAETH_INTRA,
-                                        AV1E_SET_ENABLE_CFL_INTRA,
-                                        AV1E_SET_ENABLE_DIAGONAL_INTRA,
-                                        AV1E_SET_FORCE_VIDEO_MODE,
-                                        AV1E_SET_ENABLE_OBMC,
-                                        AV1E_SET_ENABLE_OVERLAY,
-                                        AV1E_SET_ENABLE_PALETTE,
-                                        AV1E_SET_ENABLE_INTRABC,
-                                        AV1E_SET_ENABLE_ANGLE_DELTA,
-                                        AV1E_SET_DISABLE_TRELLIS_QUANT,
-                                        AV1E_SET_ENABLE_QM,
-                                        AV1E_SET_QM_MIN,
-                                        AV1E_SET_QM_MAX,
-                                        AV1E_SET_REDUCED_TX_TYPE_SET,
-                                        AV1E_SET_INTRA_DCT_ONLY,
-                                        AV1E_SET_INTER_DCT_ONLY,
-                                        AV1E_SET_INTRA_DEFAULT_TX_ONLY,
-                                        AV1E_SET_QUANT_B_ADAPT,
-                                        AV1E_SET_COEFF_COST_UPD_FREQ,
-                                        AV1E_SET_MODE_COST_UPD_FREQ,
-                                        AV1E_SET_MV_COST_UPD_FREQ,
-                                        AV1E_SET_FRAME_PARALLEL_DECODING,
-                                        AV1E_SET_ERROR_RESILIENT_MODE,
-                                        AV1E_SET_AQ_MODE,
-                                        AV1E_SET_DELTAQ_MODE,
-                                        AV1E_SET_DELTAQ_STRENGTH,
-                                        AV1E_SET_DELTALF_MODE,
-                                        AV1E_SET_FRAME_PERIODIC_BOOST,
-                                        AV1E_SET_NOISE_SENSITIVITY,
-                                        AV1E_SET_TUNE_CONTENT,
-                                        AV1E_SET_CDF_UPDATE_MODE,
-                                        AV1E_SET_COLOR_PRIMARIES,
-                                        AV1E_SET_TRANSFER_CHARACTERISTICS,
-                                        AV1E_SET_MATRIX_COEFFICIENTS,
-                                        AV1E_SET_CHROMA_SAMPLE_POSITION,
-                                        AV1E_SET_MIN_GF_INTERVAL,
-                                        AV1E_SET_MAX_GF_INTERVAL,
-                                        AV1E_SET_GF_MIN_PYRAMID_HEIGHT,
-                                        AV1E_SET_GF_MAX_PYRAMID_HEIGHT,
-                                        AV1E_SET_SUPERBLOCK_SIZE,
-                                        AV1E_SET_NUM_TG,
-                                        AV1E_SET_MTU,
-                                        AV1E_SET_TIMING_INFO_TYPE,
-                                        AV1E_SET_FILM_GRAIN_TEST_VECTOR,
-                                        AV1E_SET_FILM_GRAIN_TABLE,
+static const int av1_arg_ctrl_map[] = {
+  AOME_SET_CPUUSED, AOME_SET_ENABLEAUTOALTREF, AOME_SET_SHARPNESS,
+  AOME_SET_QUANT_SHARPNESS, AOME_SET_STATIC_THRESHOLD, AV1E_SET_ROW_MT,
+  AV1E_SET_FP_MT, AV1E_SET_TILE_COLUMNS, AV1E_SET_TILE_ROWS,
+  AV1E_SET_ENABLE_TPL_MODEL, AV1E_SET_ENABLE_KEYFRAME_FILTERING,
+  AOME_SET_ARNR_MAXFRAMES, AOME_SET_ARNR_STRENGTH, AOME_SET_TUNING,
+  AOME_SET_CQ_LEVEL, AOME_SET_MAX_INTRA_BITRATE_PCT,
+  AV1E_SET_MAX_INTER_BITRATE_PCT, AV1E_SET_GF_CBR_BOOST_PCT, AV1E_SET_LOSSLESS,
+  AV1E_SET_ENABLE_CDEF, AV1E_SET_ENABLE_RESTORATION,
+  AV1E_SET_ENABLE_RECT_PARTITIONS, AV1E_SET_ENABLE_AB_PARTITIONS,
+  AV1E_SET_ENABLE_1TO4_PARTITIONS, AV1E_SET_MIN_PARTITION_SIZE,
+  AV1E_SET_MAX_PARTITION_SIZE, AV1E_SET_ENABLE_DUAL_FILTER,
+  AV1E_SET_ENABLE_CHROMA_DELTAQ, AV1E_SET_ENABLE_INTRA_EDGE_FILTER,
+  AV1E_SET_ENABLE_ORDER_HINT, AV1E_SET_ENABLE_TX64, AV1E_SET_ENABLE_FLIP_IDTX,
+  AV1E_SET_ENABLE_RECT_TX, AV1E_SET_ENABLE_DIST_WTD_COMP,
+  AV1E_SET_ENABLE_MASKED_COMP, AV1E_SET_ENABLE_ONESIDED_COMP,
+  AV1E_SET_ENABLE_INTERINTRA_COMP, AV1E_SET_ENABLE_SMOOTH_INTERINTRA,
+  AV1E_SET_ENABLE_DIFF_WTD_COMP, AV1E_SET_ENABLE_INTERINTER_WEDGE,
+  AV1E_SET_ENABLE_INTERINTRA_WEDGE, AV1E_SET_ENABLE_GLOBAL_MOTION,
+  AV1E_SET_ENABLE_WARPED_MOTION, AV1E_SET_ENABLE_FILTER_INTRA,
+  AV1E_SET_ENABLE_SMOOTH_INTRA, AV1E_SET_ENABLE_PAETH_INTRA,
+  AV1E_SET_ENABLE_CFL_INTRA, AV1E_SET_ENABLE_DIAGONAL_INTRA,
+  AV1E_SET_FORCE_VIDEO_MODE, AV1E_SET_ENABLE_OBMC, AV1E_SET_ENABLE_OVERLAY,
+  AV1E_SET_ENABLE_PALETTE, AV1E_SET_ENABLE_INTRABC, AV1E_SET_ENABLE_ANGLE_DELTA,
+  AV1E_SET_DISABLE_TRELLIS_QUANT, AV1E_SET_ENABLE_QM, AV1E_SET_QM_MIN,
+  AV1E_SET_QM_MAX, AV1E_SET_REDUCED_TX_TYPE_SET, AV1E_SET_INTRA_DCT_ONLY,
+  AV1E_SET_INTER_DCT_ONLY, AV1E_SET_INTRA_DEFAULT_TX_ONLY,
+  AV1E_SET_QUANT_B_ADAPT, AV1E_SET_COEFF_COST_UPD_FREQ,
+  AV1E_SET_MODE_COST_UPD_FREQ, AV1E_SET_MV_COST_UPD_FREQ,
+  AV1E_SET_FRAME_PARALLEL_DECODING, AV1E_SET_ERROR_RESILIENT_MODE,
+  AV1E_SET_AQ_MODE, AV1E_SET_DELTAQ_MODE, AV1E_SET_DELTAQ_STRENGTH,
+  AV1E_SET_DELTALF_MODE, AV1E_SET_FRAME_PERIODIC_BOOST,
+  AV1E_SET_NOISE_SENSITIVITY, AV1E_SET_TUNE_CONTENT, AV1E_SET_CDF_UPDATE_MODE,
+  AV1E_SET_COLOR_PRIMARIES, AV1E_SET_TRANSFER_CHARACTERISTICS,
+  AV1E_SET_MATRIX_COEFFICIENTS, AV1E_SET_CHROMA_SAMPLE_POSITION,
+  AV1E_SET_MIN_GF_INTERVAL, AV1E_SET_MAX_GF_INTERVAL,
+  AV1E_SET_GF_MIN_PYRAMID_HEIGHT, AV1E_SET_GF_MAX_PYRAMID_HEIGHT,
+  AV1E_SET_SUPERBLOCK_SIZE, AV1E_SET_NUM_TG, AV1E_SET_MTU,
+  AV1E_SET_TIMING_INFO_TYPE, AV1E_SET_FILM_GRAIN_TEST_VECTOR,
+  AV1E_SET_FILM_GRAIN_TABLE,
 #if CONFIG_DENOISE
-                                        AV1E_SET_DENOISE_NOISE_LEVEL,
-                                        AV1E_SET_DENOISE_BLOCK_SIZE,
-                                        AV1E_SET_ENABLE_DNL_DENOISING,
+  AV1E_SET_DENOISE_NOISE_LEVEL, AV1E_SET_DENOISE_BLOCK_SIZE,
+  AV1E_SET_ENABLE_DNL_DENOISING,
 #endif  // CONFIG_DENOISE
-                                        AV1E_SET_MAX_REFERENCE_FRAMES,
-                                        AV1E_SET_REDUCED_REFERENCE_SET,
-                                        AV1E_SET_ENABLE_REF_FRAME_MVS,
-                                        AV1E_SET_TARGET_SEQ_LEVEL_IDX,
-                                        AV1E_SET_TIER_MASK,
-                                        AV1E_SET_MIN_CR,
-                                        AV1E_SET_VBR_CORPUS_COMPLEXITY_LAP,
-                                        AV1E_SET_CHROMA_SUBSAMPLING_X,
-                                        AV1E_SET_CHROMA_SUBSAMPLING_Y,
+  AV1E_SET_MAX_REFERENCE_FRAMES, AV1E_SET_REDUCED_REFERENCE_SET,
+  AV1E_SET_ENABLE_REF_FRAME_MVS, AV1E_SET_TARGET_SEQ_LEVEL_IDX,
+  AV1E_SET_TIER_MASK, AV1E_SET_MIN_CR, AV1E_SET_VBR_CORPUS_COMPLEXITY_LAP,
+  AV1E_SET_CHROMA_SUBSAMPLING_X, AV1E_SET_CHROMA_SUBSAMPLING_Y,
 #if CONFIG_TUNE_VMAF
-                                        AV1E_SET_VMAF_MODEL_PATH,
+  AV1E_SET_VMAF_MODEL_PATH,
 #endif
-                                        AV1E_SET_DV_COST_UPD_FREQ,
-                                        AV1E_SET_PARTITION_INFO_PATH,
-                                        AV1E_SET_ENABLE_DIRECTIONAL_INTRA,
-                                        AV1E_SET_ENABLE_TX_SIZE_SEARCH,
-                                        AV1E_SET_LOOPFILTER_CONTROL,
-                                        AV1E_SET_AUTO_INTRA_TOOLS_OFF,
-                                        AV1E_ENABLE_RATE_GUIDE_DELTAQ,
-                                        AV1E_SET_RATE_DISTRIBUTION_INFO,
-                                        AOME_SET_DQ_MODULATE,
-                                        AOME_SET_DELTA_QINDEX_MULT,
-                                        AOME_SET_DELTA_QINDEX_MULT_POS,
-                                        AOME_SET_DELTA_QINDEX_MULT_NEG,
-                                        AOME_SET_VMAF_MOTION_MULT,
-                                        AOME_SET_SSIM_RD_MULT,
-                                        AOME_SET_LUMA_BIAS,
-                                        AV1E_SET_CHROMA_Q_OFFSET_U,
-                                        AV1E_SET_CHROMA_Q_OFFSET_V,
+  AV1E_SET_DV_COST_UPD_FREQ, AV1E_SET_PARTITION_INFO_PATH,
+  AV1E_SET_ENABLE_DIRECTIONAL_INTRA, AV1E_SET_ENABLE_TX_SIZE_SEARCH,
+  AV1E_SET_LOOPFILTER_CONTROL, AV1E_SET_AUTO_INTRA_TOOLS_OFF,
+  AV1E_ENABLE_RATE_GUIDE_DELTAQ, AV1E_SET_RATE_DISTRIBUTION_INFO,
+  AOME_SET_DQ_MODULATE, AOME_SET_DELTA_QINDEX_MULT,
+  AOME_SET_DELTA_QINDEX_MULT_POS, AOME_SET_DELTA_QINDEX_MULT_NEG,
+  AOME_SET_VMAF_MOTION_MULT, AOME_SET_SSIM_RD_MULT, AOME_SET_LUMA_BIAS,
+  AV1E_SET_CHROMA_Q_OFFSET_U, AV1E_SET_CHROMA_Q_OFFSET_V,
 #if CONFIG_TUNE_VMAF
-                                        AOME_SET_VMAF_PREPROCESSING,
-                                        AOME_SET_VMAF_QUANTIZATION,
+  AOME_SET_VMAF_PREPROCESSING, AOME_SET_VMAF_QUANTIZATION,
 #endif
 #if CONFIG_TUNE_BUTTERAUGLI
-                                        //AOME_SET_BUTTERAUGLI_RDO_BSIZE,
-                                        AOME_SET_BUTTERAUGLI_INTENSITY_TARGET,
-                                        AOME_SET_BUTTERAUGLI_HF_ASYMMETRY,
-                                        AOME_SET_BUTTERAUGLI_RD_MULT,
-                                        AOME_SET_BUTTERAUGLI_QUANT_MULT,
-                                        AOME_SET_BUTTERAUGLI_LOOP_COUNT,
-                                        AOME_SET_BUTTERAUGLI_RESIZE_FACTOR,
-                                        AOME_SET_BUTTERAUGLI_QUANT_MULT_POS,
-                                        AOME_SET_BUTTERAUGLI_QUANT_MULT_NEG,
+  // AOME_SET_BUTTERAUGLI_RDO_BSIZE,
+  AOME_SET_BUTTERAUGLI_INTENSITY_TARGET, AOME_SET_BUTTERAUGLI_HF_ASYMMETRY,
+  AOME_SET_BUTTERAUGLI_RD_MULT, AOME_SET_BUTTERAUGLI_QUANT_MULT,
+  AOME_SET_BUTTERAUGLI_LOOP_COUNT, AOME_SET_BUTTERAUGLI_RESIZE_FACTOR,
+  AOME_SET_BUTTERAUGLI_QUANT_MULT_POS, AOME_SET_BUTTERAUGLI_QUANT_MULT_NEG,
 #endif
-                                        AOME_SET_LOOPFILTER_SHARPNESS,
-                                        AOME_SET_ENABLE_EXPERIMENTAL_PSY,
+  AOME_SET_LOOPFILTER_SHARPNESS, AOME_SET_ENABLE_EXPERIMENTAL_PSY,
 #if CONFIG_TUNE_VMAF
-                                        AOME_SET_VMAF_RESIZE_FACTOR,
-                                        AOME_SET_VMAF_RD_MULT,
+  AOME_SET_VMAF_RESIZE_FACTOR, AOME_SET_VMAF_RD_MULT,
 #endif
-                                        AOME_SET_TPL_RD_MULT,
-                                        0 };
+  AOME_SET_TPL_RD_MULT, 0
+};
 
 const arg_def_t *main_args[] = { &g_av1_codec_arg_defs.help,
                                  &g_av1_codec_arg_defs.use_cfg,
@@ -1367,21 +1298,6 @@ static const char *file_type_to_string(enum VideoFileType t) {
   switch (t) {
     case FILE_TYPE_RAW: return "RAW";
     case FILE_TYPE_Y4M: return "Y4M";
-    default: return "Other";
-  }
-}
-
-static const char *image_format_to_string(aom_img_fmt_t f) {
-  switch (f) {
-    case AOM_IMG_FMT_I420: return "I420";
-    case AOM_IMG_FMT_I422: return "I422";
-    case AOM_IMG_FMT_I444: return "I444";
-    case AOM_IMG_FMT_YV12: return "YV12";
-    case AOM_IMG_FMT_NV12: return "NV12";
-    case AOM_IMG_FMT_YV1216: return "YV1216";
-    case AOM_IMG_FMT_I42016: return "I42016";
-    case AOM_IMG_FMT_I42216: return "I42216";
-    case AOM_IMG_FMT_I44416: return "I44416";
     default: return "Other";
   }
 }
