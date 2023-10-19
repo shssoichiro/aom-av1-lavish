@@ -1102,7 +1102,7 @@ int av1_get_q_for_hdr(AV1_COMP *const cpi, MACROBLOCK *const x,
 }
 
 // offset table defined in Table3 of T-REC-H.Sup15 document.
-static const int lavish_sdr_thres[HDR_QP_LEVELS + 1] = { 0, 75, 91, 108, 125, 142, 159, 175, 192, 209, 256 };
+static const int lavish_sdr_thres[HDR_QP_LEVELS + 1] = { 0, 190, 257, 323, 390, 457, 523, 590, 657, 723, 1024 };
 
 static const int lavish_sdr_qp_offset[HDR_QP_LEVELS] = { -6, -5,  -4,  -3,  -2,
                                                     -1, 0, 1, 2, 3 };
