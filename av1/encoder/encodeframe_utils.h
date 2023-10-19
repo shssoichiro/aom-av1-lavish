@@ -354,7 +354,7 @@ int av1_get_q_for_deltaq_objective(AV1_COMP *const cpi, ThreadData *td,
 
 int av1_get_q_for_deltaq_lavish(AV1_COMP *const cpi, ThreadData *td,
                                    int64_t *delta_dist, BLOCK_SIZE bsize,
-                                   int mi_row, int mi_col);
+                                   int mi_row, int mi_col, MACROBLOCK *const x);
 
 int av1_get_q_for_hdr(AV1_COMP *const cpi, MACROBLOCK *const x,
                       BLOCK_SIZE bsize, int mi_row, int mi_col);
