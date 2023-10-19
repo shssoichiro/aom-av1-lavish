@@ -1191,7 +1191,7 @@ int av1_get_q_for_deltaq_lavish(AV1_COMP *const cpi, ThreadData *td,
   if (cpi->oxcf.color_cfg.color_primaries == AOM_CICP_CP_BT_2020) {
     for (int i = 0; i < HDR_QP_LEVELS; i++) {
       if (block_luma_avg >= hdr_thres[i] && block_luma_avg < hdr_thres[i + 1]) {
-        hdr_offset = (int)(hdr10_qp_offset[i] * QP_SCALE_FACTOR * (double)cpi->oxcf.delta_qindex_mult / 25.0);
+        hdr_offset = (int)(hdr10_qp_offset[i] * QP_SCALE_FACTOR * (double)cpi->oxcf.delta_qindex_mult / 50.0);
         break;
       }
     }
