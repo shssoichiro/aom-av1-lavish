@@ -21,17 +21,17 @@ extern "C" {
 struct AV1_COMP;
 struct AV1EncoderConfig;
 struct ThreadData;
-// TODO(wtc): These two variables are only used in avx2, sse2, neon
-// implementations, where the block size is still hard coded to TF_BLOCK_SIZE.
-// This should be fixed to align with the c implementation.
-#define BH 32
-#define BW 32
+// TODO(any): These two variables are only used in avx2, sse2, sse4
+// implementations, where the block size is still hard coded. This should be
+// fixed to align with the c implementation.
+#define BH 16
+#define BW 16
 
 // Block size used in temporal filtering.
-#define TF_BLOCK_SIZE BLOCK_32X32
+#define TF_BLOCK_SIZE BLOCK_16X16
 
 // Window size for temporal filtering.
-#define TF_WINDOW_LENGTH 5
+#define TF_WINDOW_LENGTH 3
 
 // A constant number, sqrt(pi / 2),  used for noise estimation.
 static const double SQRT_PI_BY_2 = 1.25331413732;
@@ -40,17 +40,17 @@ static const double SQRT_PI_BY_2 = 1.25331413732;
 // be tuned for a better performance.
 // 0. A scale factor used in temporal filtering to raise the filter weight from
 //    `double` with range [0, 1] to `int` with range [0, 1000].
-#define TF_WEIGHT_SCALE 1000
+#define TF_WEIGHT_SCALE 333
 // 1. Weight factor used to balance the weighted-average between window error
 //    and block error. The weight is for window error while the weight for block
 //    error is always set as 1.
-#define TF_WINDOW_BLOCK_BALANCE_WEIGHT 5
+#define TF_WINDOW_BLOCK_BALANCE_WEIGHT 1
 // 2. Threshold for using q to adjust the filtering weight. Concretely, when
 //    using a small q (high bitrate), we would like to reduce the filtering
 //    strength such that more detailed information can be preserved. Hence, when
 //    q is smaller than this threshold, we will adjust the filtering weight
 //    based on the q-value.
-#define TF_Q_DECAY_THRESHOLD 20
+#define TF_Q_DECAY_THRESHOLD 255
 // 3. Normalization factor used to normalize the motion search error. Since the
 //    motion search error can be large and uncontrollable, we will simply
 //    normalize it before using it to compute the filtering weight.
@@ -69,7 +69,7 @@ static const double SQRT_PI_BY_2 = 1.25331413732;
 //    threshold. Taking 720p videos as an instance, if this field equals to 0.1,
 //    then the actual threshold will be 720 * 0.1 = 72. Similarly, the threshold
 //    for 360p videos will be 360 * 0.1 = 36.
-#define TF_SEARCH_DISTANCE_THRESHOLD 0.1
+#define TF_SEARCH_DISTANCE_THRESHOLD 0.05
 // 6. Threshold to identify if the q is in a relative high range.
 //    Above this cutoff q, a stronger filtering is applied.
 //    For a high q, the quantization throws away more information, and thus a
@@ -77,9 +77,9 @@ static const double SQRT_PI_BY_2 = 1.25331413732;
 //    stronger filtering could reduce bit rates.
 //    Ror a low q, more details are expected to be retained. Filtering is thus
 //    more conservative.
-#define TF_QINDEX_CUTOFF 128
+#define TF_QINDEX_CUTOFF 255
 
-#define NOISE_ESTIMATION_EDGE_THRESHOLD 50
+#define NOISE_ESTIMATION_EDGE_THRESHOLD 20
 
 // Sum and SSE source vs filtered frame difference returned by
 // temporal filter.

@@ -1119,14 +1119,15 @@ int av1_get_q_for_deltaq_lavish(AV1_COMP *const cpi, ThreadData *td,
   double intra_cost = 0;
   double mc_dep_reg = 0;
   double mc_dep_cost = 0;
-  double cbcmp_mult = 0.25;
-  double cbcmp_base = 1 * cbcmp_mult;
+  double cbcmp_base = 1;
   double srcrf_dist = 0;
   double srcrf_sse = 0;
   double srcrf_rate = 0;
   const int mi_wide = mi_size_wide[bsize];
   const int mi_high = mi_size_high[bsize];
-  const int base_qindex = cm->quant_params.base_qindex;
+  int base_qindex = cm->quant_params.base_qindex;
+  //base_qindex -= (int)(cm->quant_params.base_qindex / 2 * (1 - log(1 + av1_log_block_wavelet_energy(x, bsize))));
+  base_qindex -= cm->quant_params.base_qindex * ((2000 / (av1_log_block_y(x, bsize, cm->seq_params->bit_depth == AOM_BITS_8) + 85)) - 10) / 14;
 
   if (tpl_idx >= MAX_TPL_FRAME_IDX) return base_qindex;
 
@@ -1135,6 +1136,53 @@ int av1_get_q_for_deltaq_lavish(AV1_COMP *const cpi, ThreadData *td,
   int tpl_stride = tpl_frame->stride;
   if (!tpl_frame->is_valid) return base_qindex;
 
+  int deltaq_multiplier = 100;
+
+  double hdr_offset_double = 0.0;
+  int hdr_offset = 0;
+
+  // calculate pixel average
+  const int block_luma_avg = av1_log_block_avg_hbd(x, bsize);
+  // adjust offset based on average of the pixel block
+  if (cpi->oxcf.color_cfg.color_primaries == AOM_CICP_CP_BT_2020) {
+    for (int i = 0; i < HDR_QP_LEVELS; i++) {
+      if (block_luma_avg >= hdr_thres[i] && block_luma_avg < hdr_thres[i + 1]) {
+        hdr_offset_double = (hdr10_qp_offset[i] * QP_SCALE_FACTOR);
+
+        if ((cpi->oxcf.delta_qindex_mult_pos >= 0) && (hdr_offset_double > 0.0)) {
+          deltaq_multiplier = cpi->oxcf.delta_qindex_mult_pos;
+        } else if ((cpi->oxcf.delta_qindex_mult_neg >= 0) && (hdr_offset_double < 0.0)) {
+          deltaq_multiplier = cpi->oxcf.delta_qindex_mult_neg;
+        } else {
+          deltaq_multiplier = cpi->oxcf.delta_qindex_mult;
+        }
+
+        hdr_offset_double *= ((double)deltaq_multiplier / 100.0);
+        hdr_offset = (int)hdr_offset_double;
+        break;
+      }
+    }
+  } else {
+    for (int i = 0; i < HDR_QP_LEVELS; i++) {
+      if (block_luma_avg >= lavish_sdr_thres[i] && block_luma_avg < lavish_sdr_thres[i + 1]) {
+        hdr_offset_double = (lavish_sdr_qp_offset[i] * QP_SCALE_FACTOR);
+
+        if ((cpi->oxcf.delta_qindex_mult_pos >= 0) && (hdr_offset_double > 0.0)) {
+          deltaq_multiplier = cpi->oxcf.delta_qindex_mult_pos;
+        } else if ((cpi->oxcf.delta_qindex_mult_neg >= 0) && (hdr_offset_double < 0.0)) {
+          deltaq_multiplier = cpi->oxcf.delta_qindex_mult_neg;
+        } else {
+          deltaq_multiplier = cpi->oxcf.delta_qindex_mult;
+        }
+
+        hdr_offset_double *= ((double)deltaq_multiplier / 50.0);
+        hdr_offset = (int)hdr_offset_double;
+        break;
+      }
+    }
+  }
+  
+  base_qindex += hdr_offset;
 #ifndef NDEBUG
   int mi_count = 0;
 #endif
@@ -1152,7 +1200,7 @@ int av1_get_q_for_deltaq_lavish(AV1_COMP *const cpi, ThreadData *td,
       if (row >= cm->mi_params.mi_rows || col >= mi_cols_sr) continue;
       TplDepStats *this_stats =
           &tpl_stats[av1_tpl_ptr_pos(row, col, tpl_stride, block_mis_log2)];
-      double cbcmp = (double)this_stats->srcrf_dist * cbcmp_mult;
+      double cbcmp = (double)this_stats->srcrf_dist;
       int64_t mc_dep_delta =
           RDCOST(tpl_frame->base_rdmult, this_stats->mc_dep_rate,
                  this_stats->mc_dep_dist);
@@ -1172,39 +1220,19 @@ int av1_get_q_for_deltaq_lavish(AV1_COMP *const cpi, ThreadData *td,
   assert(mi_count <= MAX_TPL_BLK_IN_SB * MAX_TPL_BLK_IN_SB);
 
   int offset = 0;
-  int hdr_offset = 0;
   double beta = 1.0;
   double rk;
   if (mc_dep_cost > 0 && intra_cost > 0) {
     const double r0 = cpi->rd.r0;
     rk = exp((intra_cost - mc_dep_cost) / cbcmp_base);
     td->mb.rb = exp((intra_cost - mc_dep_reg) / cbcmp_base);
-    beta = (r0 / rk) * (double)cpi->oxcf.delta_qindex_mult / 100.0;
+    beta = (r0 / rk);
     assert(beta > 0.0);
   } else {
     return base_qindex;
   }
 
-  // calculate pixel average
-  const int block_luma_avg = av1_log_block_avg_hbd(x, bsize);
-  // adjust offset based on average of the pixel block
-  if (cpi->oxcf.color_cfg.color_primaries == AOM_CICP_CP_BT_2020) {
-    for (int i = 0; i < HDR_QP_LEVELS; i++) {
-      if (block_luma_avg >= hdr_thres[i] && block_luma_avg < hdr_thres[i + 1]) {
-        hdr_offset = (int)(hdr10_qp_offset[i] * QP_SCALE_FACTOR * (double)cpi->oxcf.delta_qindex_mult / 50.0);
-        break;
-      }
-    }
-  } else {
-    for (int i = 0; i < HDR_QP_LEVELS; i++) {
-      if (block_luma_avg >= lavish_sdr_thres[i] && block_luma_avg < lavish_sdr_thres[i + 1]) {
-        hdr_offset = (int)(lavish_sdr_qp_offset[i] * QP_SCALE_FACTOR * (double)cpi->oxcf.delta_qindex_mult / 25.0);
-        break;
-      }
-    }
-  }
-
-  offset = av1_get_deltaq_offset(cm->seq_params->bit_depth, base_qindex + hdr_offset, beta);
+  offset = av1_get_deltaq_offset(cm->seq_params->bit_depth, base_qindex, beta);
 
   const DeltaQInfo *const delta_q_info = &cm->delta_q_info;
   offset = AOMMIN(offset, delta_q_info->delta_q_res * 9 - 1);

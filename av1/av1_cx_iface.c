@@ -439,7 +439,7 @@ static const struct av1_extracfg default_extra_cfg = {
   1,              // enable_tpl_model
   1,              // enable_keyframe_filtering
   7,              // arnr_max_frames
-  5,              // arnr_strength
+  1,              // arnr_strength
   0,              // min_gf_interval; 0 -> default decision
   0,              // max_gf_interval; 0 -> default decision
   0,              // gf_min_pyr_height
@@ -1018,7 +1018,7 @@ static aom_codec_err_t validate_config(aom_codec_alg_priv_t *ctx,
   RANGE_CHECK(extra_cfg, vmaf_rd_mult, 1, 1000);
   RANGE_CHECK_BOOL(extra_cfg, vmaf_quantization);
 #endif
-  RANGE_CHECK(extra_cfg, tpl_strength, 1, 1000);
+  RANGE_CHECK(extra_cfg, tpl_strength, 0, 1000);
   RANGE_CHECK(extra_cfg, luma_bias_strength, 1, 100);
   RANGE_CHECK(extra_cfg, luma_bias_midpoint, 0, 255);
   RANGE_CHECK_BOOL(extra_cfg, invert_luma_bias);

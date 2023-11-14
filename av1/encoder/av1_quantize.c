@@ -878,6 +878,31 @@ void av1_set_quantizer(AV1_COMMON *const cm, int min_qmlevel, int max_qmlevel,
     }
   }
 
+  // TODO(aomedia:2717): need to design better delta
+  int adjustment = 0;
+  if (enable_chroma_deltaq && chroma_q_offset_u == 0 && chroma_q_offset_v == 0) {
+    // If chroma-deltaq is enabled and the user hasn't specifed their own
+    // offsets, we apply default offsets. 420: -2, 422: -1, 444: +2
+    int subsampling = cpi->source->subsampling_x + cpi->source->subsampling_y;
+    switch (subsampling)
+    {
+    case 2:
+      adjustment = -2;
+      break;
+    case 1:
+      adjustment = -1;
+      break;
+    default:
+      adjustment = +2;
+      break;
+    }
+  }
+
+  quant_params->u_dc_delta_q = adjustment + chroma_q_offset_u;
+  quant_params->u_ac_delta_q = adjustment + chroma_q_offset_u;
+  quant_params->v_dc_delta_q = adjustment + chroma_q_offset_v;
+  quant_params->v_ac_delta_q = adjustment + chroma_q_offset_v;
+
   quant_params->qmatrix_level_y =
       aom_get_qmlevel(quant_params->base_qindex, min_qmlevel, max_qmlevel);
   quant_params->qmatrix_level_u =

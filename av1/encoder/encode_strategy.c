@@ -747,7 +747,7 @@ static int denoise_and_encode(AV1_COMP *const cpi, uint8_t *const dest,
 
   // Decide whether to apply temporal filtering to the source frame.
   int apply_filtering =
-      av1_is_temporal_filter_on(oxcf) && !is_stat_generation_stage(cpi);
+      av1_is_temporal_filter_on(oxcf) && !is_stat_generation_stage(cpi) && (cpi->oxcf.tpl_strength != 0);
   if (update_type != KF_UPDATE && update_type != ARF_UPDATE && !is_second_arf) {
     apply_filtering = 0;
   }

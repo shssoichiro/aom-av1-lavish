@@ -369,7 +369,7 @@ static int get_twopass_worst_quality(AV1_COMP *cpi, const double av_frame_err,
 }
 
 #define INTRA_PART 0.005
-#define DEFAULT_DECAY_LIMIT 0.75
+#define DEFAULT_DECAY_LIMIT 0.5
 #define LOW_SR_DIFF_TRHESH 0.01
 #define NCOUNT_FRAME_II_THRESH 5.0
 #define LOW_CODED_ERR_PER_MB 0.01

@@ -14,8 +14,8 @@
 
 #include "aom_dsp/odintrin.h"
 
-#define CDEF_BLOCKSIZE 64
-#define CDEF_BLOCKSIZE_LOG2 6
+#define CDEF_BLOCKSIZE 16
+#define CDEF_BLOCKSIZE_LOG2 4
 #define CDEF_NBLOCKS ((1 << MAX_SB_SIZE_LOG2) / 8)
 #define CDEF_SB_SHIFT (MAX_SB_SIZE_LOG2 - CDEF_BLOCKSIZE_LOG2)
 
