@@ -1372,33 +1372,31 @@ void av1_set_mb_ssim_rdmult_scaling(AV1_COMP *cpi) {
       cpi->oxcf.tune_cfg.tuning == AOM_TUNE_LAVISH ||
       cpi->oxcf.tune_cfg.tuning == AOM_TUNE_LAVISH_FAST ||
       cpi->oxcf.tune_cfg.tuning == AOM_TUNE_OMNI) {
-        var = exp(var_log / num_of_var);
         int cq_level = cpi->oxcf.rc_cfg.cq_level;
         double hq_level = 30 * 4;
         double delta;
         if (cpi->oxcf.tune_cfg.tuning == AOM_TUNE_LAVISH ||
         cpi->oxcf.tune_cfg.tuning == AOM_TUNE_LAVISH_FAST) { // Sharper RD to mix with Butteraugli
-          hq_level = 30 * 4;
           cq_level = *xd->qindex;
           delta =
             cq_level < hq_level
                 ? 0.25 * (double)(hq_level - cq_level) / hq_level
                 : 3.333 * (double)(cq_level - hq_level) / (MAXQ - hq_level);
-        } else if (cpi->oxcf.tune_cfg.tuning == AOM_TUNE_OMNI) { // Slightly less sharp RD for non-butter
-          hq_level = 35 * 2;
-          cq_level = *xd->qindex;
-          delta =
-            cq_level < hq_level
-                ? 0.25 * (double)(hq_level - cq_level) / hq_level
-                : 2.0 * (double)(cq_level - hq_level) / (MAXQ - hq_level);
-        } else {
+        } else { // SSIM and others
           delta =
             cq_level < hq_level
                 ? 0.5 * (double)(hq_level - cq_level) / hq_level
                 : 10.0 * (double)(cq_level - hq_level) / (MAXQ - hq_level);
         }
-        // Curve fitting with an exponential model on user rating dataset.
-        var = 39.126 * (1 - exp(-0.0009413 * var)) + 1.236 + delta;
+        if (cpi->oxcf.tune_cfg.tuning == AOM_TUNE_OMNI) {
+          var = var / pow(num_of_var, 2.);
+          var = 67.035434 * sqrt((1 - exp(-0.0021489 * pow(var, 2.)))) + 17.492222;
+          //printf("var: %f", var);
+        } else {
+          // Curve fitting with an exponential model on user rating dataset.
+          var = exp(var_log / num_of_var);
+          var = 39.126 * (1 - exp(-0.0009413 * var)) + 1.236 + delta;
+        }
       } else {
         var = var / num_of_var;
         // Curve fitting with an exponential model on all 16x16 blocks from the
@@ -1423,8 +1421,6 @@ void av1_set_mb_ssim_rdmult_scaling(AV1_COMP *cpi) {
       (cpi->oxcf.tune_cfg.tuning == AOM_TUNE_LAVISH &&
       cpi->oxcf.q_cfg.deltaq_mode != NO_DELTA_Q) ||
       (cpi->oxcf.tune_cfg.tuning == AOM_TUNE_LAVISH_FAST &&
-      cpi->oxcf.q_cfg.deltaq_mode != NO_DELTA_Q) ||
-      (cpi->oxcf.tune_cfg.tuning == AOM_TUNE_OMNI &&
       cpi->oxcf.q_cfg.deltaq_mode != NO_DELTA_Q)) {
     const int sb_size = cpi->common.seq_params->sb_size;
     const int num_mi_w_sb = mi_size_wide[sb_size];
@@ -1438,16 +1434,63 @@ void av1_set_mb_ssim_rdmult_scaling(AV1_COMP *cpi) {
     assert(num_blk_w * num_mi_w == num_mi_w_sb);
     assert(num_blk_h * num_mi_h == num_mi_h_sb);
 
+    for (int row = 0; row < num_rows_sb; ++row) {
+      for (int col = 0; col < num_cols_sb; ++col) {
+        double log_sum_sb = 0.0;
+        double blk_count = 0.0;
+        for (int blk_row = row * num_blk_h;
+             blk_row < (row + 1) * num_blk_h && blk_row < num_rows; ++blk_row) {
+          for (int blk_col = col * num_blk_w;
+               blk_col < (col + 1) * num_blk_w && blk_col < num_cols;
+               ++blk_col) {
+            const int index = blk_row * num_cols + blk_col;
+            log_sum_sb += log(cpi->ssim_rdmult_scaling_factors[index]);
+            blk_count += 1.0;
+          }
+        }
+        log_sum_sb = exp(log_sum_sb / blk_count);
+        for (int blk_row = row * num_blk_h;
+             blk_row < (row + 1) * num_blk_h && blk_row < num_rows; ++blk_row) {
+          for (int blk_col = col * num_blk_w;
+               blk_col < (col + 1) * num_blk_w && blk_col < num_cols;
+               ++blk_col) {
+            const int index = blk_row * num_cols + blk_col;
+            cpi->ssim_rdmult_scaling_factors[index] /= log_sum_sb;
+            if (cpi->oxcf.enable_experimental_psy == 1) { // Additional psy modulation?? Test more! Visual: https://www.desmos.com/calculator/mq5fqbfdne
+              if (cpi->ssim_rdmult_scaling_factors[index] <= 1.0) {
+                cpi->ssim_rdmult_scaling_factors[index] = exp(cpi->ssim_rdmult_scaling_factors[index] * cpi->ssim_rdmult_scaling_factors[index] - 1.0);
+              } else {
+                //*weight = log(*weight) + 1.0;
+                cpi->ssim_rdmult_scaling_factors[index] = sqrt(log(cpi->ssim_rdmult_scaling_factors[index]) + 0.01) + 0.9;
+              }
+            }
+          }
+        }
+      }
+    }
+  } else {
+  
   // As log_sum holds the geometric mean, it will be in the range
   // [17.492222, 84.527656]. Hence, in the below loop, the value of
   // cpi->ssim_rdmult_scaling_factors[index] would be in the range
   // [0.2069, 4.8323].
   log_sum = exp(log_sum / (double)(num_rows * num_cols));
+  //printf("logsum: %f\n", log_sum);
+    for (int row = 0; row < num_rows; ++row) {
+      for (int col = 0; col < num_cols; ++col) {
+        const int index = row * num_cols + col;
+        cpi->ssim_rdmult_scaling_factors[index] /= log_sum;
 
-  for (int row = 0; row < num_rows; ++row) {
-    for (int col = 0; col < num_cols; ++col) {
-      const int index = row * num_cols + col;
-      cpi->ssim_rdmult_scaling_factors[index] /= log_sum;
+        if (cpi->oxcf.enable_experimental_psy == 1) { // Additional psy modulation?? Test more! Visual: https://www.desmos.com/calculator/mq5fqbfdne
+          if (cpi->ssim_rdmult_scaling_factors[index] <= 1.0) {
+            cpi->ssim_rdmult_scaling_factors[index] = exp(cpi->ssim_rdmult_scaling_factors[index] * cpi->ssim_rdmult_scaling_factors[index] - 1.0);
+          } else {
+            //*weight = log(*weight) + 1.0;
+            cpi->ssim_rdmult_scaling_factors[index] = sqrt(log(cpi->ssim_rdmult_scaling_factors[index]) + 0.01) + 0.9;
+          }
+        }
+
+      }
     }
   }
 }

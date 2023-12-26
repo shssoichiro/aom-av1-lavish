@@ -620,7 +620,7 @@ void av1_apply_temporal_filter_c(
     const YV12_BUFFER_CONFIG *frame_to_filter, const MACROBLOCKD *mbd,
     const BLOCK_SIZE block_size, const int mb_row, const int mb_col,
     const int num_planes, const double *noise_levels, const MV *subblock_mvs,
-    const int *subblock_mses, const int q_factor, const int filter_strength,
+    const int *subblock_mses, const int q_factor, const double filter_strength,
     int tf_wgt_calc_lvl, const uint8_t *pred, uint32_t *accum,
     uint16_t *count) {
   // Block information.
@@ -781,7 +781,7 @@ void av1_highbd_apply_temporal_filter_c(
     const YV12_BUFFER_CONFIG *frame_to_filter, const MACROBLOCKD *mbd,
     const BLOCK_SIZE block_size, const int mb_row, const int mb_col,
     const int num_planes, const double *noise_levels, const MV *subblock_mvs,
-    const int *subblock_mses, const int q_factor, const int filter_strength,
+    const int *subblock_mses, const int q_factor, const double filter_strength,
     int tf_wgt_calc_lvl, const uint8_t *pred, uint32_t *accum,
     uint16_t *count) {
   av1_apply_temporal_filter_c(frame_to_filter, mbd, block_size, mb_row, mb_col,
@@ -882,7 +882,7 @@ void av1_tf_do_filtering_row(AV1_COMP *cpi, ThreadData *td, int mb_row) {
   uint8_t *pred = tf_data->pred;
 
   // Factor to control the filering strength.
-  int filter_strength = cpi->oxcf.algo_cfg.arnr_strength;
+  double filter_strength = (double)cpi->oxcf.algo_cfg.arnr_strength;
 
   // https://bugs.chromium.org/p/aomedia/issues/detail?id=3211 seems to be
   // resolved by lowering the filtering strength to 1 on keyframes,
@@ -892,7 +892,11 @@ void av1_tf_do_filtering_row(AV1_COMP *cpi, ThreadData *td, int mb_row) {
   if (update_type == KF_UPDATE &&
       cpi->oxcf.kf_cfg.enable_keyframe_filtering == 1 &&
       cpi->oxcf.algo_cfg.arnr_strength >= 2) {
-    filter_strength = 1;
+    filter_strength = 1.;
+  }
+
+  if (cpi->oxcf.tpl_strength != 100) {
+    filter_strength *= (cpi->oxcf.tpl_strength / 100.);
   }
 
   // Do filtering.

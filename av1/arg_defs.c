@@ -553,8 +553,9 @@ const av1_codec_arg_definitions_t g_av1_codec_arg_defs = {
       ARG_DEF(NULL, "deltaq-mode", 1,
               "Delta qindex mode (0: off, 1: deltaq objective (default), "
               "2: deltaq placeholder, 3: key frame visual quality, 4: user "
-              "rating based visual quality optimization); "
-              "requires --enable-tpl-model=1"),
+              "rating based visual quality optimization, \n "
+              "                                        5: HDR deltaq optimization, 6: Lavish [Modified DQ1]); "
+              "deltaq-mode=1/2 require --enable-tpl-model=1 as a prerequisite"),
   .deltaq_strength = ARG_DEF(NULL, "deltaq-strength", 1,
                              "Deltaq strength for"
                              " --deltaq-mode=4 (%)"),
@@ -726,8 +727,8 @@ const av1_codec_arg_definitions_t g_av1_codec_arg_defs = {
                        "Multiplier for SSIM rdmult "
                                   "(Meant for hyper-tuning, only active with ipq and ssim tunes, defaults to 100)"),
   .luma_bias = ARG_DEF(NULL, "luma-bias", 1,
-                       "Apply a bias to low luma blocks "
-                                  "(Recommended to leave default (-15..(1)..15)"),
+                       "Apply a bias to low luma blocks (Default of 20 when tune-content=psy and bias is unset, otherwise 0) "
+                                  "Value range: ((0)...100), Interactive Desmos: https://www.desmos.com/calculator/d0ho3lfiag"),
   .chroma_q_offset_u = ARG_DEF(NULL, "chroma-q-offset-u", 1,
                        "Adjust the automatic chroma Q offset for the u plane"),
   .chroma_q_offset_v = ARG_DEF(NULL, "chroma-q-offset-v", 1,
@@ -776,8 +777,21 @@ const av1_codec_arg_definitions_t g_av1_codec_arg_defs = {
                        "Multiplier for vmaf tunes rdmult "
                                   "(Meant for hyper-tuning, only active with tunes that utilize vmaf rdo, defaults to 100)"),
 #endif
-  .tpl_rd_mult = ARG_DEF(NULL, "tpl-rd-mult", 1,
-                       "Multiplier for tpl rdmult "
+  .tpl_strength = ARG_DEF(NULL, "tpl-strength", 1,
+                       "Multiplier for tpl filtering strength, defaults to 100 "
                                   "(Meant for hyper-tuning, defaults to 100)"),
+  .luma_bias_strength = ARG_DEF(NULL, "luma-bias-strength", 1,
+                       "Controls how steep the curve of the luma bias is, higher = steeper "
+                                  "Value range: 1..(15)..100"),
+  .luma_bias_midpoint = ARG_DEF(NULL, "luma-bias-midpoint", 1,
+                       "Controls where the center of the luma bias will be, higher = bias starts at higher luma values "
+                                  "Value range: 0..(40)..255"),
+  .invert_luma_bias = ARG_DEF(NULL, "invert-luma-bias", 1,
+                       "If inverted (1), raise rdmult in the opposite luminance direction (raises rdmult around and past the midpoint) "
+                                  "Value range: (0)...1"),
+  .global_motion_method = ARG_DEF_ENUM(NULL, "global-motion-method", 1,
+                                       "Global motion search method "
+                                       "(default: disflow)",
+                                       global_motion_method_enum),
 #endif  // CONFIG_AV1_ENCODER
 };

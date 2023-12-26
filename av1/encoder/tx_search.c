@@ -1089,10 +1089,13 @@ static INLINE void dist_block_tx_domain(MACROBLOCK *x, int plane, int block,
   tran_low_t *const dqcoeff = p->dqcoeff + block_offset;
 #if CONFIG_AV1_HIGHBITDEPTH
   MACROBLOCKD *const xd = &x->e_mbd;
-  if (is_cur_buf_hbd(xd)) {
+  if (is_cur_buf_hbd(xd) && (qmatrix == NULL || !x->txfm_search_params.use_qm_dist_metric)) {
     // TODO(veluca): handle use_qm_dist_metric for HBD too.
     *out_dist = av1_highbd_block_error(coeff, dqcoeff, buffer_length, &this_sse,
                                        xd->bd);
+  } else if (is_cur_buf_hbd(xd)) {
+    *out_dist = av1_block_error_qm(coeff, dqcoeff, buffer_length, qmatrix,
+                                     scan, &this_sse);
   } else {
 #endif
     if (qmatrix == NULL || !x->txfm_search_params.use_qm_dist_metric) {

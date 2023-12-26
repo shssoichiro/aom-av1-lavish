@@ -364,21 +364,21 @@ static const int rd_layer_depth_factor[7] = {
 // The function here is a first pass estimate based on data from
 // a previous Vizer run
 static double def_inter_rd_multiplier(int qindex) {
-  return 3.2 + (0.0015 * (double)qindex);
+  return 2.8 + (0.0015 * (double)qindex);
 }
 
 // Returns the default rd multiplier for ARF/Golden Frames for a given qindex.
 // The function here is a first pass estimate based on data from
 // a previous Vizer run
 static double def_arf_rd_multiplier(int qindex) {
-  return 3.25 + (0.0015 * (double)qindex);
+  return 3.2 + (0.0015 * (double)qindex);
 }
 
 // Returns the default rd multiplier for key frames for a given qindex.
 // The function here is a first pass estimate based on data from
 // a previous Vizer run
 static double def_kf_rd_multiplier(int qindex) {
-  return 3.3 + (0.0015 * (double)qindex);
+  return 3.25 + (0.0015 * (double)qindex);
 }
 
 int av1_compute_rd_mult_based_on_qindex(aom_bit_depth_t bit_depth,

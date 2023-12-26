@@ -48,7 +48,7 @@ typedef void (*TemporalFilterFunc)(
     const YV12_BUFFER_CONFIG *frame_to_filter, const MACROBLOCKD *mbd,
     const BLOCK_SIZE block_size, const int mb_row, const int mb_col,
     const int num_planes, const double *noise_level, const MV *subblock_mvs,
-    const int *subblock_mses, const int q_factor, const int filter_strength,
+    const int *subblock_mses, const int q_factor, const double filter_strength,
     int tf_wgt_calc_lvl, const uint8_t *pred, uint32_t *accum, uint16_t *count);
 typedef libaom_test::FuncParam<TemporalFilterFunc> TemporalFilterFuncParam;
 
@@ -178,7 +178,7 @@ void TemporalFilterTest::RunTest(int isRandom, int run_times,
     const MV subblock_mvs[4] = { { 0, 0 }, { 5, 5 }, { 7, 8 }, { 2, 10 } };
     const int subblock_mses[4] = { 15, 16, 17, 18 };
     const int q_factor = 12;
-    const int filter_strength = 5;
+    const double filter_strength = 5;
     const int mb_row = 0;
     const int mb_col = 0;
     std::unique_ptr<YV12_BUFFER_CONFIG> frame_to_filter(new (std::nothrow)
@@ -427,7 +427,7 @@ typedef void (*HBDTemporalFilterFunc)(
     const YV12_BUFFER_CONFIG *frame_to_filter, const MACROBLOCKD *mbd,
     const BLOCK_SIZE block_size, const int mb_row, const int mb_col,
     const int num_planes, const double *noise_level, const MV *subblock_mvs,
-    const int *subblock_mses, const int q_factor, const int filter_strength,
+    const int *subblock_mses, const int q_factor, const double filter_strength,
     int tf_wgt_calc_lvl, const uint8_t *pred, uint32_t *accum, uint16_t *count);
 typedef libaom_test::FuncParam<HBDTemporalFilterFunc>
     HBDTemporalFilterFuncParam;
@@ -561,7 +561,7 @@ void HBDTemporalFilterTest::RunTest(int isRandom, int run_times, int BD,
     const MV subblock_mvs[4] = { { 0, 0 }, { 5, 5 }, { 7, 8 }, { 2, 10 } };
     const int subblock_mses[4] = { 15, 16, 17, 18 };
     const int q_factor = 12;
-    const int filter_strength = 5;
+    const double filter_strength = 5;
     const int mb_row = 0;
     const int mb_col = 0;
     std::unique_ptr<YV12_BUFFER_CONFIG> frame_to_filter(new (std::nothrow)

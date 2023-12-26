@@ -369,7 +369,7 @@ void av1_highbd_apply_temporal_filter_avx2(
     const YV12_BUFFER_CONFIG *frame_to_filter, const MACROBLOCKD *mbd,
     const BLOCK_SIZE block_size, const int mb_row, const int mb_col,
     const int num_planes, const double *noise_levels, const MV *subblock_mvs,
-    const int *subblock_mses, const int q_factor, const int filter_strength,
+    const int *subblock_mses, const int q_factor, const double filter_strength,
     int tf_wgt_calc_lvl, const uint8_t *pred, uint32_t *accum,
     uint16_t *count) {
   const int is_high_bitdepth = frame_to_filter->flags & YV12_FLAG_HIGHBITDEPTH;

@@ -630,26 +630,16 @@ static void setup_block_rdmult(const AV1_COMP *const cpi, MACROBLOCK *const x,
     av1_set_vmaf_rdmult(cpi, x, bsize, mi_row, mi_col, &x->rdmult);
   }
 #endif
-  if (cpi->oxcf.tune_cfg.tuning == AOM_TUNE_OMNI) { // Switches and mixes chosen rdmult based on which (ssim/default) has a lower value,
-    int omni_rdmult = x->rdmult;                    // intended for high fidelity
-    int omni_errorperbit = x->errorperbit;
-    av1_set_ssim_rdmult(cpi, &x->errorperbit, bsize, mi_row, mi_col,
-                        &x->rdmult);
-    int ssim_rdmult = x->rdmult;
-    int ssim_errorperbit = x->errorperbit;
-    if (ssim_rdmult < omni_rdmult) {
-      omni_rdmult = (int) (((int64_t)(ssim_rdmult * 2.5) + (int64_t)(omni_rdmult)) / 3.5);
-    } else {
-      omni_rdmult = (int) (((int64_t)(ssim_rdmult) + (int64_t)(omni_rdmult * 2.5)) / 3.5);
-    }
-
-    if (ssim_errorperbit < omni_errorperbit) {
-      omni_errorperbit = (int) (((int64_t)(ssim_errorperbit * 2.5) + (int64_t)(omni_errorperbit)) / 3.5);
-    } else {
-      omni_errorperbit = (int) (((int64_t)(ssim_errorperbit) + (int64_t)(omni_errorperbit * 2.5)) / 3.5);
-    }
-    x->rdmult = omni_rdmult;
-    x->errorperbit = omni_errorperbit;
+  if (cpi->oxcf.tune_cfg.tuning == AOM_TUNE_OMNI) { // SSIM tuning in euclidean space(?)
+    // Operate in long space since we get NaN or negative values otherwise due to the sheer size of the numbers.
+    long int pow_original_rdmult = (long int)powl((long double)x->rdmult, 2); // Square the original rdmult
+    av1_set_ssim_rdmult(cpi, &x->errorperbit, bsize, mi_row, mi_col,  // Omni tuning, SSIM-like but calculated by squaring the variance result
+                        &x->rdmult);                                  // and then acquiring the square root of the resulting weight.
+    long int ssim_rdmult = (long int)powl((long double)x->rdmult, 2); // Square the rdmult post-ssim tuning.
+    x->rdmult = (int)((sqrtl(ssim_rdmult + pow_original_rdmult)) / sqrt(2) + 0.5);
+    x->rdmult = AOMMAX(x->rdmult, 0);
+    av1_set_error_per_bit(&x->errorperbit, x->rdmult);
+    // Should this method be done in weight-space rather than rdmult-space? Maybe.
   }
 #if CONFIG_TUNE_BUTTERAUGLI
   else if (cpi->oxcf.tune_cfg.tuning == AOM_TUNE_BUTTERAUGLI) {
@@ -685,6 +675,29 @@ static void setup_block_rdmult(const AV1_COMP *const cpi, MACROBLOCK *const x,
 #endif
   if (cpi->oxcf.mode == ALLINTRA || cpi->oxcf.tune_cfg.content == AOM_CONTENT_PSY) {
     x->rdmult = (int)(((int64_t)x->rdmult * x->intra_sb_rdmult_modifier) >> 7);
+  }
+
+  if (cpi->oxcf.luma_bias != 0 || (cpi->oxcf.tune_cfg.content == AOM_CONTENT_PSY && cpi->oxcf.luma_bias_override == 0)) {
+    int avg_brightness;
+    BitDepthInfo bd_info = get_bit_depth_info(&x->e_mbd);
+    if (bd_info.use_highbitdepth_buf) {
+      // We bitshift if the bitdepth is > 8 to normalize the results to 0-255
+      avg_brightness = av1_log_block_avg_hbd(x, bsize) >> (bd_info.bit_depth - 8);
+    } else {
+      avg_brightness = av1_log_block_avg(x, bsize);
+    }
+    double luma_adjustment = 0;
+    if (cpi->oxcf.luma_bias_override == 0 && cpi->oxcf.tune_cfg.content == AOM_CONTENT_PSY) { // If user hasn't set a luma-bias and we're using content=psy
+      //Equivalent to luma_bias = 15, with user-changable strength = 10, midpoint = 40
+      luma_adjustment = (1 - ((100. - 15.) / 100.)) / (1 + exp(-(cpi->oxcf.luma_bias_strength * (avg_brightness - cpi->oxcf.luma_bias_midpoint)) / 255.));
+      luma_adjustment += (cpi->oxcf.invert_luma_bias == 0) ? ((100. - 15.) / 100.) : 1.; // If not inverted, add 1.0 - strength/100, otherwise add 1
+    } else {
+      //luma_adjustment = cos( pow(((double)avg_brightness - 255.0) / (5100.0 / (10. + ((double)cpi->oxcf.luma_bias) / 8.) ), cpi->oxcf.luma_bias_power)); //Old method
+      luma_adjustment = (1 - ((100. - (double)cpi->oxcf.luma_bias) / 100.)) / (1 + exp(-(cpi->oxcf.luma_bias_strength * (avg_brightness - cpi->oxcf.luma_bias_midpoint)) / 255.)); // Sigmoid curve for modifying rdmult, with a max of 1.0 (by default), with user-adjustable variables.
+      luma_adjustment += (cpi->oxcf.invert_luma_bias == 0) ? ((100. - (double)cpi->oxcf.luma_bias) / 100.) : 1.;
+    }
+    //luma_adjustment = 1.0 - ((double) avg_brightness / (5100.0 / (double) cpi->oxcf.luma_bias)); Old method
+    x->rdmult = (int) ((double) x->rdmult * luma_adjustment);
   }
 
   // Check to make sure that the adjustments above have not caused the

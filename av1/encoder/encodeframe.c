@@ -281,6 +281,11 @@ static AOM_INLINE void setup_delta_q(AV1_COMP *const cpi, ThreadData *td,
     // Setup deltaq based on tpl stats
     current_qindex =
         av1_get_q_for_deltaq_objective(cpi, td, NULL, sb_size, mi_row, mi_col);
+  } else if (cpi->oxcf.q_cfg.deltaq_mode == DELTA_Q_LAVISH &&
+             cpi->oxcf.algo_cfg.enable_tpl_model) {
+    // Setup deltaq based on tpl stats
+    current_qindex =
+        av1_get_q_for_deltaq_lavish(cpi, td, NULL, sb_size, mi_row, mi_col);
   } else if (cpi->oxcf.q_cfg.deltaq_mode == DELTA_Q_PERCEPTUAL_AI) {
     current_qindex = av1_get_sbq_perceptual_ai(cpi, sb_size, mi_row, mi_col);
   } else if (cpi->oxcf.q_cfg.deltaq_mode == DELTA_Q_USER_RATING_BASED) {
@@ -1906,6 +1911,8 @@ static AOM_INLINE void encode_frame_internal(AV1_COMP *cpi) {
       cm->delta_q_info.delta_q_res = DEFAULT_DELTA_Q_RES_PERCEPTUAL;
     else if (deltaq_mode == DELTA_Q_HDR)
       cm->delta_q_info.delta_q_res = DEFAULT_DELTA_Q_RES_PERCEPTUAL;
+    else if (deltaq_mode == DELTA_Q_LAVISH)
+      cm->delta_q_info.delta_q_res = DEFAULT_DELTA_Q_RES_OBJECTIVE;
     // Set delta_q_present_flag before it is used for the first time
     cm->delta_q_info.delta_lf_res = DEFAULT_DELTA_LF_RES;
     cm->delta_q_info.delta_q_present_flag = deltaq_mode != NO_DELTA_Q;
@@ -1916,11 +1923,11 @@ static AOM_INLINE void encode_frame_internal(AV1_COMP *cpi) {
     // frames currently.
     const GF_GROUP *gf_group = &cpi->ppi->gf_group;
     if (cm->delta_q_info.delta_q_present_flag) {
-      if (deltaq_mode == DELTA_Q_OBJECTIVE &&
+      if ((deltaq_mode == DELTA_Q_OBJECTIVE || deltaq_mode == DELTA_Q_LAVISH) &&
           gf_group->update_type[cpi->gf_frame_index] == LF_UPDATE)
         cm->delta_q_info.delta_q_present_flag = 0;
 
-      if (deltaq_mode == DELTA_Q_OBJECTIVE &&
+      if ((deltaq_mode == DELTA_Q_OBJECTIVE || deltaq_mode == DELTA_Q_LAVISH) &&
           cm->delta_q_info.delta_q_present_flag) {
         cm->delta_q_info.delta_q_present_flag &= allow_deltaq_mode(cpi);
       }

@@ -222,6 +222,13 @@ struct av1_extracfg {
   int vmaf_resize_factor;
   int vmaf_rd_mult;
   int tpl_rd_mult;
+  int tpl_strength;
+  int luma_bias_strength;
+  int luma_bias_midpoint;
+  int invert_luma_bias;
+  int luma_bias_override;
+  int sb_qp_sweep;
+  GlobalMotionMethod global_motion_method;
 };
 
 #if CONFIG_REALTIME_ONLY
@@ -393,7 +400,7 @@ static const struct av1_extracfg default_extra_cfg = {
   -1,              // delta_qindex_mult_neg
   100,             // vmaf_motion_mult
   100,             // ssim_rd_mult
-  1,               // luma_bias
+  0,               // luma_bias
   0,               // vmaf_preprocessing
   0,               // vmaf_quantization
   100,             // butteraugli_intensity_target
@@ -409,6 +416,13 @@ static const struct av1_extracfg default_extra_cfg = {
   1,               // vmaf_resize_factor
   100,             // vmaf_rd_mult
   100,             // tpl_rd_mult
+  100,             // tpl_strength
+  10,              // luma_bias_strength
+  40,              // luma_bias_midpoint
+  0,               // invert_luma_bias
+  0,               // luma_bias_override
+  0,               // sb_qp_sweep
+  GLOBAL_MOTION_METHOD_DISFLOW,  // global_motion_method
 };
 #else
 static const struct av1_extracfg default_extra_cfg = {
@@ -566,7 +580,7 @@ static const struct av1_extracfg default_extra_cfg = {
   -1,              // delta_qindex_mult_neg
   100,             // vmaf_motion_mult
   100,             // ssim_rd_mult
-  1,               // luma_bias
+  0,               // luma_bias
   0,               // vmaf_preprocessing
   0,               // vmaf_quantization
   100,             // butteraugli_intensity_target
@@ -582,6 +596,13 @@ static const struct av1_extracfg default_extra_cfg = {
   1,               // vmaf_resize_factor
   100,             // vmaf_rd_mult
   100,             // tpl_rd_mult
+  100,             // tpl_strength
+  10,              // luma_bias_strength
+  40,              // luma_bias_midpoint
+  0,               // invert_luma_bias
+  0,               // luma_bias_override
+  0,               // sb_qp_sweep
+  GLOBAL_MOTION_METHOD_DISFLOW,  // global_motion_method
 };
 #endif
 
@@ -976,7 +997,7 @@ static aom_codec_err_t validate_config(aom_codec_alg_priv_t *ctx,
   RANGE_CHECK(extra_cfg, delta_qindex_mult_neg, -1, 1000);
   RANGE_CHECK(extra_cfg, vmaf_motion_mult, 1, 1000);
   RANGE_CHECK(extra_cfg, ssim_rd_mult, 1, 1000);
-  RANGE_CHECK(extra_cfg, luma_bias, -15, 15);
+  RANGE_CHECK(extra_cfg, luma_bias, 0, 99);
   RANGE_CHECK(extra_cfg, chroma_q_offset_u, -63, 63);
   RANGE_CHECK(extra_cfg, chroma_q_offset_v, -63, 63);
 #if CONFIG_TUNE_VMAF
@@ -995,9 +1016,12 @@ static aom_codec_err_t validate_config(aom_codec_alg_priv_t *ctx,
 #if CONFIG_TUNE_VMAF
   RANGE_CHECK(extra_cfg, vmaf_resize_factor, 0, 3);
   RANGE_CHECK(extra_cfg, vmaf_rd_mult, 1, 1000);
-  RANGE_CHECK(extra_cfg, tpl_rd_mult, 1, 1000);
   RANGE_CHECK_BOOL(extra_cfg, vmaf_quantization);
 #endif
+  RANGE_CHECK(extra_cfg, tpl_strength, 1, 1000);
+  RANGE_CHECK(extra_cfg, luma_bias_strength, 1, 100);
+  RANGE_CHECK(extra_cfg, luma_bias_midpoint, 0, 255);
+  RANGE_CHECK_BOOL(extra_cfg, invert_luma_bias);
   RANGE_CHECK_HI(extra_cfg, loopfilter_sharpness, 7);
   RANGE_CHECK_BOOL(extra_cfg, enable_experimental_psy);
   return AOM_CODEC_OK;
@@ -1649,6 +1673,23 @@ static void set_encoder_config(AV1EncoderConfig *oxcf,
 #endif
 
   oxcf->tpl_rd_mult = extra_cfg->tpl_rd_mult;
+  
+  oxcf->tpl_strength = extra_cfg->tpl_strength;
+
+  oxcf->luma_bias_strength = extra_cfg->luma_bias_strength;
+
+  oxcf->luma_bias_midpoint = extra_cfg->luma_bias_midpoint;
+
+  oxcf->invert_luma_bias = extra_cfg->invert_luma_bias;
+
+  oxcf->luma_bias_override = extra_cfg->luma_bias_override;
+
+  oxcf->frame_periodic_boost = extra_cfg->frame_periodic_boost;
+
+  oxcf->sb_qp_sweep = extra_cfg->sb_qp_sweep;
+
+  oxcf->global_motion_method = extra_cfg->global_motion_method;
+
   return AOM_CODEC_OK;
 }
 
@@ -4415,9 +4456,18 @@ static aom_codec_err_t encoder_set_option(aom_codec_alg_priv_t *ctx,
                               argv, err_string)) {
     extra_cfg.vmaf_rd_mult = arg_parse_int_helper(&arg, err_string);
 #endif
-  } else if (arg_match_helper(&arg, &g_av1_codec_arg_defs.tpl_rd_mult,
+  } else if (arg_match_helper(&arg, &g_av1_codec_arg_defs.tpl_strength,
                               argv, err_string)) {
-    extra_cfg.tpl_rd_mult = arg_parse_int_helper(&arg, err_string);
+    extra_cfg.tpl_strength = arg_parse_int_helper(&arg, err_string);
+  } else if (arg_match_helper(&arg, &g_av1_codec_arg_defs.luma_bias_strength,
+                              argv, err_string)) {
+    extra_cfg.luma_bias_strength = arg_parse_int_helper(&arg, err_string);
+  } else if (arg_match_helper(&arg, &g_av1_codec_arg_defs.luma_bias_midpoint,
+                              argv, err_string)) {
+    extra_cfg.luma_bias_midpoint = arg_parse_int_helper(&arg, err_string);
+  } else if (arg_match_helper(&arg, &g_av1_codec_arg_defs.invert_luma_bias,
+                              argv, err_string)) {
+    extra_cfg.invert_luma_bias = arg_parse_int_helper(&arg, err_string);
   } else if (arg_match_helper(&arg, &g_av1_codec_arg_defs.tile_height, argv,
                               err_string)) {
     ctx->cfg.tile_height_count = arg_parse_list_helper(
@@ -4509,6 +4559,7 @@ static aom_codec_err_t ctrl_set_luma_bias(aom_codec_alg_priv_t *ctx,
                                           va_list args) {
   struct av1_extracfg extra_cfg = ctx->extra_cfg;
   extra_cfg.luma_bias = CAST(AOME_SET_LUMA_BIAS, args);
+  extra_cfg.luma_bias_override = 1;
   return update_extra_cfg(ctx, &extra_cfg);
 }
 
@@ -4624,10 +4675,38 @@ static aom_codec_err_t ctrl_set_vmaf_rd_mult(aom_codec_alg_priv_t *ctx,
   return update_extra_cfg(ctx, &extra_cfg);
 }
 
-static aom_codec_err_t ctrl_set_tpl_rd_mult(aom_codec_alg_priv_t *ctx,
+static aom_codec_err_t ctrl_set_tpl_strength(aom_codec_alg_priv_t *ctx,
                                           va_list args) {
   struct av1_extracfg extra_cfg = ctx->extra_cfg;
-  extra_cfg.tpl_rd_mult = CAST(AOME_SET_TPL_RD_MULT, args);
+  extra_cfg.tpl_strength = CAST(AOME_SET_TPL_STRENGTH, args);
+  return update_extra_cfg(ctx, &extra_cfg);
+}
+
+static aom_codec_err_t ctrl_set_luma_bias_strength(aom_codec_alg_priv_t *ctx,
+                                          va_list args) {
+  struct av1_extracfg extra_cfg = ctx->extra_cfg;
+  extra_cfg.luma_bias_strength = CAST(AOME_SET_LUMA_BIAS_STRENGTH, args);
+  return update_extra_cfg(ctx, &extra_cfg);
+}
+
+static aom_codec_err_t ctrl_set_luma_bias_midpoint(aom_codec_alg_priv_t *ctx,
+                                          va_list args) {
+  struct av1_extracfg extra_cfg = ctx->extra_cfg;
+  extra_cfg.luma_bias_midpoint = CAST(AOME_SET_LUMA_BIAS_MIDPOINT, args);
+  return update_extra_cfg(ctx, &extra_cfg);
+}
+
+static aom_codec_err_t ctrl_set_invert_luma_bias(aom_codec_alg_priv_t *ctx,
+                                          va_list args) {
+  struct av1_extracfg extra_cfg = ctx->extra_cfg;
+  extra_cfg.invert_luma_bias = CAST(AOME_SET_INVERT_LUMA_BIAS, args);
+  return update_extra_cfg(ctx, &extra_cfg);
+}
+
+static aom_codec_err_t ctrl_set_luma_bias_override(aom_codec_alg_priv_t *ctx,
+                                          va_list args) {
+  struct av1_extracfg extra_cfg = ctx->extra_cfg;
+  extra_cfg.luma_bias_override = CAST(AOME_SET_LUMA_BIAS_OVERRIDE, args);
   return update_extra_cfg(ctx, &extra_cfg);
 }
 
@@ -4816,6 +4895,12 @@ static aom_codec_ctrl_fn_map_t encoder_ctrl_maps[] = {
   { AOME_SET_VMAF_RESIZE_FACTOR, ctrl_set_vmaf_resize_factor },
   { AOME_SET_VMAF_RD_MULT, ctrl_set_vmaf_rd_mult },
   { AOME_SET_TPL_RD_MULT, ctrl_set_tpl_rd_mult },
+  { AOME_SET_TPL_STRENGTH, ctrl_set_tpl_strength },
+  { AOME_SET_LUMA_BIAS_STRENGTH, ctrl_set_luma_bias_strength },
+  { AOME_SET_LUMA_BIAS_MIDPOINT, ctrl_set_luma_bias_midpoint },
+  { AOME_SET_INVERT_LUMA_BIAS, ctrl_set_invert_luma_bias },
+  { AOME_SET_LUMA_BIAS_OVERRIDE, ctrl_set_luma_bias_override },
+  { AV1E_SET_QUANTIZER_ONE_PASS, ctrl_set_quantizer_one_pass },
 
   // Getters
   { AOME_GET_LAST_QUANTIZER, ctrl_get_quantizer },

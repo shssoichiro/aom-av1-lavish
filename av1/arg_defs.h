@@ -266,6 +266,12 @@ typedef struct av1_codec_arg_definitions {
   arg_def_t vmaf_rd_mult;
 #endif
   arg_def_t tpl_rd_mult;
+  arg_def_t tpl_strength;
+  arg_def_t luma_bias_strength;
+  arg_def_t luma_bias_midpoint;
+  arg_def_t invert_luma_bias;
+  arg_def_t sb_qp_sweep;
+  arg_def_t global_motion_method;
 #endif  // CONFIG_AV1_ENCODER
 } av1_codec_arg_definitions_t;
 

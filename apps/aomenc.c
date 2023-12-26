@@ -236,12 +236,12 @@ static const int av1_arg_ctrl_map[] = { AOME_SET_CPUUSED,
 #endif
                                         AV1E_SET_DV_COST_UPD_FREQ,
                                         AV1E_SET_PARTITION_INFO_PATH,
+                                        AV1E_ENABLE_RATE_GUIDE_DELTAQ,
+                                        AV1E_SET_RATE_DISTRIBUTION_INFO,
                                         AV1E_SET_ENABLE_DIRECTIONAL_INTRA,
                                         AV1E_SET_ENABLE_TX_SIZE_SEARCH,
                                         AV1E_SET_LOOPFILTER_CONTROL,
                                         AV1E_SET_AUTO_INTRA_TOOLS_OFF,
-                                        AV1E_ENABLE_RATE_GUIDE_DELTAQ,
-                                        AV1E_SET_RATE_DISTRIBUTION_INFO,
                                         AOME_SET_DQ_MODULATE,
                                         AOME_SET_DELTA_QINDEX_MULT,
                                         AOME_SET_DELTA_QINDEX_MULT_POS,
@@ -272,7 +272,11 @@ static const int av1_arg_ctrl_map[] = { AOME_SET_CPUUSED,
                                         AOME_SET_VMAF_RESIZE_FACTOR,
                                         AOME_SET_VMAF_RD_MULT,
 #endif
-                                        AOME_SET_TPL_RD_MULT,
+                                        AOME_SET_TPL_STRENGTH,
+                                        AOME_SET_LUMA_BIAS_STRENGTH,
+                                        AOME_SET_LUMA_BIAS_MIDPOINT,
+                                        AOME_SET_INVERT_LUMA_BIAS,
+                                        AOME_SET_LUMA_BIAS_OVERRIDE,
                                         0 };
 
 const arg_def_t *main_args[] = { &g_av1_codec_arg_defs.help,
@@ -509,7 +513,10 @@ const arg_def_t *av1_ctrl_args[] = {
   &g_av1_codec_arg_defs.vmaf_resize_factor,
   &g_av1_codec_arg_defs.vmaf_rd_mult,
 #endif
-  &g_av1_codec_arg_defs.tpl_rd_mult,
+  &g_av1_codec_arg_defs.tpl_strength,
+  &g_av1_codec_arg_defs.luma_bias_strength,
+  &g_av1_codec_arg_defs.luma_bias_midpoint,
+  &g_av1_codec_arg_defs.invert_luma_bias,
   NULL,
 };
 

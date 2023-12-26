@@ -1642,9 +1642,19 @@ static void get_intra_q_and_bounds(const AV1_COMP *cpi, int width, int height,
       active_best_quality /= 3;
     }
 
-    // Allow somewhat lower kf minq with small image formats.
-    if ((width * height) <= (352 * 288)) {
-      q_adj_factor -= 0.25;
+    // Allow lower kf minq.
+    if (cpi->oxcf.rc_cfg.mode == AOM_Q) {
+      // This change mostly improves SSIM score. PSNR change is small.
+      // Both constant q mode and VBR mode show similar results.
+      // Since it makes the key frame size larger, we only allow it in
+      // constant q mode for now.
+      // TODO(any): test if this change could work for one pass CBR and VBR.
+      q_adj_factor -= cpi->oxcf.enable_experimental_psy ? -0.2 : 0.3;
+      //printf("q_adj: %f\n", q_adj_factor);
+    } else {
+      if ((width * height) <= (352 * 288)) {
+        q_adj_factor -= 0.25;
+      }
     }
 
     // Make a further adjustment based on the kf zero motion measure.
@@ -2167,10 +2177,26 @@ int av1_rc_pick_q_and_bounds(AV1_COMP *cpi, int width, int height, int gf_index,
     } else {
       q = rc_pick_q_and_bounds_no_stats(cpi, width, height, bottom_index,
                                         top_index);
+      if (cpi->oxcf.frame_periodic_boost == 1) {
+        //printf("q before: %d\n", q);
+        if (cpi->rc.frames_since_key > cpi->svc.number_temporal_layers) {
+          q -= cpi->common.current_frame.frame_type == KEY_FRAME ? 20 : 15;
+          //printf("frames_since_key: %d, number_temporal_layers: %d\n", cpi->rc.frames_since_key, cpi->svc.number_temporal_layers);
+        }
+        //printf("q after: %d\n", q);
+      }
     }
   } else {
     q = rc_pick_q_and_bounds(cpi, width, height, gf_index, bottom_index,
                              top_index);
+    if (cpi->oxcf.frame_periodic_boost == 1) {
+      //printf("q before: %d\n", q);
+      if (cpi->rc.frames_since_key > cpi->svc.number_temporal_layers) {
+        q -= cpi->common.current_frame.frame_type == KEY_FRAME ? 20 : 15;
+        //printf("frames_since_key: %d, number_temporal_layers: %d\n", cpi->rc.frames_since_key, cpi->svc.number_temporal_layers);
+      }
+      //printf("q after: %d\n", q);
+    }
   }
   if (gf_group->update_type[gf_index] == ARF_UPDATE) p_rc->arf_q = q;
 

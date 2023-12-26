@@ -16,6 +16,7 @@
 #include "av1/encoder/encoder.h"
 #include "av1/encoder/encodeframe_utils.h"
 #include "av1/encoder/rdopt.h"
+#include "aq_variance.h"
 
 void av1_set_ssim_rdmult(const AV1_COMP *const cpi, int *errorperbit,
                          const BLOCK_SIZE bsize, const int mi_row,
@@ -62,7 +63,7 @@ void av1_set_ssim_rdmult(const AV1_COMP *const cpi, int *errorperbit,
     }
   }
   geom_mean_of_scale = pow(geom_mean_of_scale * cpi->oxcf.ssim_rd_mult / 100.0, (1.0 / num_of_mi));
-
+  //printf("weight_mod: %f\n", geom_mean_of_scale);
   *rdmult = (int)((double)(*rdmult) * geom_mean_of_scale + 0.5);
   *rdmult = AOMMAX(*rdmult, 0);
   av1_set_error_per_bit(errorperbit, *rdmult);
@@ -1067,6 +1068,108 @@ int av1_get_q_for_deltaq_objective(AV1_COMP *const cpi, ThreadData *td,
 }
 
 #if !DISABLE_HDR_LUMA_DELTAQ
+
+int av1_get_q_for_deltaq_lavish(AV1_COMP *const cpi, ThreadData *td,
+                                   int64_t *delta_dist, BLOCK_SIZE bsize,
+                                   int mi_row, int mi_col) {
+  AV1_COMMON *const cm = &cpi->common;
+  assert(IMPLIES(cpi->ppi->gf_group.size > 0,
+                 cpi->gf_frame_index < cpi->ppi->gf_group.size));
+  const int tpl_idx = cpi->gf_frame_index;
+  TplParams *const tpl_data = &cpi->ppi->tpl_data;
+  const uint8_t block_mis_log2 = tpl_data->tpl_stats_block_mis_log2;
+  double intra_cost = 0;
+  double mc_dep_reg = 0;
+  double mc_dep_cost = 0;
+  double cbcmp_mult = 0.25;
+  double cbcmp_base = 1 * cbcmp_mult;
+  double srcrf_dist = 0;
+  double srcrf_sse = 0;
+  double srcrf_rate = 0;
+  const int mi_wide = mi_size_wide[bsize];
+  const int mi_high = mi_size_high[bsize];
+  const int base_qindex = cm->quant_params.base_qindex;
+
+  if (tpl_idx >= MAX_TPL_FRAME_IDX) return base_qindex;
+
+  TplDepFrame *tpl_frame = &tpl_data->tpl_frame[tpl_idx];
+  TplDepStats *tpl_stats = tpl_frame->tpl_stats_ptr;
+  int tpl_stride = tpl_frame->stride;
+  if (!tpl_frame->is_valid) return base_qindex;
+
+#ifndef NDEBUG
+  int mi_count = 0;
+#endif
+  const int mi_col_sr =
+      coded_to_superres_mi(mi_col, cm->superres_scale_denominator);
+  const int mi_col_end_sr =
+      coded_to_superres_mi(mi_col + mi_wide, cm->superres_scale_denominator);
+  const int mi_cols_sr = av1_pixels_to_mi(cm->superres_upscaled_width);
+  const int step = 1 << block_mis_log2;
+  const int row_step = step;
+  const int col_step_sr =
+      coded_to_superres_mi(step, cm->superres_scale_denominator);
+  for (int row = mi_row; row < mi_row + mi_high; row += row_step) {
+    for (int col = mi_col_sr; col < mi_col_end_sr; col += col_step_sr) {
+      if (row >= cm->mi_params.mi_rows || col >= mi_cols_sr) continue;
+      TplDepStats *this_stats =
+          &tpl_stats[av1_tpl_ptr_pos(row, col, tpl_stride, block_mis_log2)];
+      double cbcmp = (double)this_stats->srcrf_dist * cbcmp_mult;
+      int64_t mc_dep_delta =
+          RDCOST(tpl_frame->base_rdmult, this_stats->mc_dep_rate,
+                 this_stats->mc_dep_dist);
+      double dist_scaled = (double)(this_stats->recrf_dist << RDDIV_BITS);
+      intra_cost += log(dist_scaled) * cbcmp;
+      mc_dep_cost += log(dist_scaled + mc_dep_delta) * cbcmp;
+      mc_dep_reg += log(3 * dist_scaled + mc_dep_delta) * cbcmp;
+      srcrf_dist += (double)(this_stats->srcrf_dist << RDDIV_BITS);
+      srcrf_sse += (double)(this_stats->srcrf_sse << RDDIV_BITS);
+      srcrf_rate += (double)(this_stats->srcrf_rate << TPL_DEP_COST_SCALE_LOG2);
+#ifndef NDEBUG
+      mi_count++;
+#endif
+      cbcmp_base += cbcmp;
+    }
+  }
+  assert(mi_count <= MAX_TPL_BLK_IN_SB * MAX_TPL_BLK_IN_SB);
+
+  int offset = 0;
+  double beta = 1.0;
+  double rk;
+  if (mc_dep_cost > 0 && intra_cost > 0) {
+    const double r0 = cpi->rd.r0;
+    rk = exp((intra_cost - mc_dep_cost) / cbcmp_base);
+    td->mb.rb = exp((intra_cost - mc_dep_reg) / cbcmp_base);
+    beta = (r0 / rk) * (double)cpi->oxcf.delta_qindex_mult / 100.0;
+    assert(beta > 0.0);
+  } else {
+    return base_qindex;
+  }
+  offset = av1_get_deltaq_offset(cm->seq_params->bit_depth, base_qindex, beta);
+
+  const DeltaQInfo *const delta_q_info = &cm->delta_q_info;
+  offset = AOMMIN(offset, delta_q_info->delta_q_res * 9 - 1);
+  offset = AOMMAX(offset, -delta_q_info->delta_q_res * 9 + 1);
+  int qindex = cm->quant_params.base_qindex + offset;
+  qindex = AOMMIN(qindex, MAXQ);
+  qindex = AOMMAX(qindex, MINQ);
+
+  int frm_qstep = av1_dc_quant_QTX(base_qindex, 0, cm->seq_params->bit_depth);
+  int sbs_qstep =
+      av1_dc_quant_QTX(base_qindex, offset, cm->seq_params->bit_depth);
+
+  if (delta_dist) {
+    double sbs_dist = srcrf_dist * pow((double)sbs_qstep / frm_qstep, 2.0);
+    double sbs_rate = srcrf_rate * ((double)frm_qstep / sbs_qstep);
+    sbs_dist = AOMMIN(sbs_dist, srcrf_sse);
+    *delta_dist = (int64_t)((sbs_dist - srcrf_dist) / rk);
+    *delta_dist += RDCOST(tpl_frame->base_rdmult, 4 * 256, 0);
+    *delta_dist += RDCOST(tpl_frame->base_rdmult, sbs_rate - srcrf_rate, 0);
+  }
+  return qindex;
+}
+
+
 // offset table defined in Table3 of T-REC-H.Sup15 document.
 static const int hdr_thres[HDR_QP_LEVELS + 1] = { 0,   301, 367, 434, 501, 567,
                                                   634, 701, 767, 834, 1024 };
