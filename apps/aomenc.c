@@ -1931,7 +1931,7 @@ static void test_decode(struct stream_state *stream,
   aom_img_free(&dec_img);
 }
 
-static void print_time(const char *label, int64_t etl) {
+static void print_time(int64_t etl) {
   int64_t mins;
   int64_t secs;
 
@@ -2073,9 +2073,6 @@ int main(int argc, const char **argv_) {
     }
 
     int frames_in = 0, seen_frames = 0;
-    int64_t estimated_time_left = -1;
-    int64_t average_rate = -1;
-    int64_t lagged_count = 0;
     const int need_downscale =
         pass_need_downscale(global.pass, global.passes, pass);
 
@@ -2439,6 +2436,7 @@ int main(int argc, const char **argv_) {
           float fps = usec_to_fps(cx_time, seen_frames);
           fprintf(stderr, "\rPass %d/%d ", pass + 1, global.passes);
 
+          int64_t bytes = (int64_t)streams->nbytes;
           if (stream_cnt == 1)
             fprintf(stderr, "frame %4d/%-4d", frames_in, streams->frames_out);
           else

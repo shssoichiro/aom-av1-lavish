@@ -13,6 +13,7 @@
 #include "av1/common/quant_common.h"
 #include "av1/common/reconintra.h"
 
+#include "av1/encoder/aq_variance.h"
 #include "av1/encoder/encoder.h"
 #include "av1/encoder/encodeframe_utils.h"
 #include "av1/encoder/rdopt.h"

@@ -2020,6 +2020,8 @@ static void search_tx_type(const AV1_COMP *cpi, MACROBLOCK *x, int plane,
                            FAST_TX_SEARCH_MODE ftxs_mode, int skip_trellis,
                            int64_t ref_best_rd, RD_STATS *best_rd_stats) {
   const AV1_COMMON *cm = &cpi->common;
+  const AV1EncoderConfig *const oxcf = &cpi->oxcf;
+  const TuneCfg *tune_params = &oxcf->tune_cfg;
   MACROBLOCKD *xd = &x->e_mbd;
   MB_MODE_INFO *mbmi = xd->mi[0];
   const TxfmSearchParams *txfm_params = &x->txfm_search_params;
