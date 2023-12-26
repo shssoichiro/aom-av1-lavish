@@ -228,7 +228,7 @@ void av1_apply_temporal_filter_neon_dotprod(
   }
   // Smaller strength -> smaller filtering weight.
   double s_decay = pow((double)filter_strength / TF_STRENGTH_THRESHOLD, 2);
-  s_decay = CLIP(s_decay, 1e-5, 1);
+  s_decay = CLIP(s_decay, 1e-5, 1.2);
   double d_factor[4] = { 0 };
   uint8_t frame_abs_diff[SSE_STRIDE * BH] = { 0 };
   uint32_t luma_sse_sum[BW * BH] = { 0 };

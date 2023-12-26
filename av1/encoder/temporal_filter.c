@@ -652,7 +652,7 @@ void av1_apply_temporal_filter_c(
   }
   // Smaller strength -> smaller filtering weight.
   double s_decay = pow((double)filter_strength / TF_STRENGTH_THRESHOLD, 2);
-  s_decay = CLIP(s_decay, 1e-5, 1);
+  s_decay = CLIP(s_decay, 1e-5, 1.2);
   for (int plane = 0; plane < num_planes; plane++) {
     // Larger noise -> larger filtering weight.
     const double n_decay = 0.5 + log(2 * noise_levels[plane] + 5.0);
@@ -1126,7 +1126,7 @@ static void tf_setup_filtering_buffer(AV1_COMP *cpi,
   int adjust_num = 6;
   const int adjust_num_frames_for_arf_filtering =
       cpi->sf.hl_sf.adjust_num_frames_for_arf_filtering;
-  if (num_frames == 1) {  // `arnr_max_frames = 1` is used to disable filtering.
+  if (num_frames <= 1) {  // `arnr_max_frames = 1` is used to disable filtering.
     adjust_num = 0;
   } else if ((update_type != KF_UPDATE) &&
              (cpi->oxcf.tune_cfg.content == AOM_CONTENT_PSY)) {
@@ -1159,6 +1159,11 @@ static void tf_setup_filtering_buffer(AV1_COMP *cpi,
     else
       adjust_num = adjust_num_frames[2];
   }
+
+  if (update_type == KF_UPDATE && num_frames == 0) {
+    num_frames = 1;
+  }
+
   num_frames = AOMMIN(num_frames + adjust_num, lookahead_depth);
 
   if (frame_type == KEY_FRAME) {
