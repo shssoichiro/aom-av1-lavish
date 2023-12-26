@@ -501,7 +501,7 @@ static int compute_rd_thresh_factor(int qindex, aom_bit_depth_t bit_depth) {
       return -1;
   }
   // TODO(debargha): Adjust the function below.
-  return AOMMAX((int)(pow(q, RD_THRESH_POW) * 5.12), 8);
+  return AOMMAX((int)(pow(q, RD_THRESH_POW) * 2.8), 8);
 }
 
 void av1_set_sad_per_bit(const AV1_COMP *cpi, int *sadperbit, int qindex) {
