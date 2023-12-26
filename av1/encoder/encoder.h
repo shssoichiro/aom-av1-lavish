@@ -94,7 +94,7 @@ extern "C" {
 #define CHROMA_QP_SCALE -0.46
 #define CHROMA_QP_OFFSET 9.26
 #define QP_SCALE_FACTOR 2.0
-#define DISABLE_HDR_LUMA_DELTAQ 1
+#define DISABLE_HDR_LUMA_DELTAQ 0
 
 // Rational number with an int64 numerator
 // This structure holds a fractional value
