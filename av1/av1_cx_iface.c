@@ -84,6 +84,8 @@ struct av1_extracfg {
   unsigned int frame_parallel_decoding_mode;
   int enable_dual_filter;
   unsigned int enable_chroma_deltaq;
+  int chroma_q_offset_u;
+  int chroma_q_offset_v;
   AQ_MODE aq_mode;
   DELTAQ_MODE deltaq_mode;
   int deltaq_strength;
@@ -196,6 +198,8 @@ struct av1_extracfg {
   // "--enable_paeth_intra",
   // "--enable_cfl_intra",
   // "--enable_diagonal_intra".
+  int chroma_q_offset_u;
+  int chroma_q_offset_v;
   int auto_intra_tools_off;
   int strict_level_conformance;
   int kf_max_pyr_height;
@@ -227,8 +231,6 @@ struct av1_extracfg {
   int luma_bias_midpoint;
   int invert_luma_bias;
   int luma_bias_override;
-  int sb_qp_sweep;
-  GlobalMotionMethod global_motion_method;
 };
 
 #if CONFIG_REALTIME_ONLY
@@ -292,6 +294,8 @@ static const struct av1_extracfg default_extra_cfg = {
   0,                            // frame_parallel_decoding_mode
   1,                            // enable dual filter
   0,                            // enable delta quant in chroma planes
+  0,                            // chroma_q_offset_u
+  0,                            // chroma_q_offset_v
   NO_AQ,                        // aq_mode
   NO_DELTA_Q,                   // deltaq_mode
   100,                          // deltaq_strength
@@ -952,6 +956,10 @@ static aom_codec_err_t validate_config(aom_codec_alg_priv_t *ctx,
       ERROR("Only --aq_mode=0 can be used with --lossless=1.");
     if (extra_cfg->enable_chroma_deltaq)
       ERROR("Only --enable_chroma_deltaq=0 can be used with --lossless=1.");
+    if (extra_cfg->chroma_q_offset_u)
+      ERROR("Only --chroma_q_offset_u=0 can be used with --lossless=1.");
+    if (extra_cfg->chroma_q_offset_v)
+      ERROR("Only --chroma_q_offset_v=0 can be used with --lossless=1.");
   }
 
   RANGE_CHECK(extra_cfg, max_reference_frames, 3, 7);
@@ -1321,6 +1329,8 @@ static void set_encoder_config(AV1EncoderConfig *oxcf,
   q_cfg->qm_maxlevel = extra_cfg->qm_max;
   q_cfg->quant_b_adapt = extra_cfg->quant_b_adapt;
   q_cfg->enable_chroma_deltaq = extra_cfg->enable_chroma_deltaq;
+  q_cfg->chroma_q_offset_u = extra_cfg->chroma_q_offset_u;
+  q_cfg->chroma_q_offset_v = extra_cfg->chroma_q_offset_v;
   q_cfg->aq_mode = extra_cfg->aq_mode;
   q_cfg->deltaq_mode = extra_cfg->deltaq_mode;
   q_cfg->deltaq_strength = extra_cfg->deltaq_strength;
@@ -4461,15 +4471,15 @@ static aom_codec_err_t encoder_set_option(aom_codec_alg_priv_t *ctx,
   } else if (arg_match_helper(&arg, &g_av1_codec_arg_defs.tpl_strength,
                               argv, err_string)) {
     extra_cfg.tpl_strength = arg_parse_int_helper(&arg, err_string);
-  } else if (arg_match_helper(&arg, &g_av1_codec_arg_defs.luma_bias_strength,
+  } else if (arg_match_helper(&arg, &g_av1_codec_arg_defs.luma_bias,
                               argv, err_string)) {
-    extra_cfg.luma_bias_strength = arg_parse_int_helper(&arg, err_string);
-  } else if (arg_match_helper(&arg, &g_av1_codec_arg_defs.luma_bias_midpoint,
+    extra_cfg.luma_bias = arg_parse_int_helper(&arg, err_string);
+  } else if (arg_match_helper(&arg, &g_av1_codec_arg_defs.chroma_q_offset_u,
                               argv, err_string)) {
-    extra_cfg.luma_bias_midpoint = arg_parse_int_helper(&arg, err_string);
-  } else if (arg_match_helper(&arg, &g_av1_codec_arg_defs.invert_luma_bias,
+    extra_cfg.chroma_q_offset_u = arg_parse_int_helper(&arg, err_string);
+  } else if (arg_match_helper(&arg, &g_av1_codec_arg_defs.chroma_q_offset_v,
                               argv, err_string)) {
-    extra_cfg.invert_luma_bias = arg_parse_int_helper(&arg, err_string);
+    extra_cfg.chroma_q_offset_v = arg_parse_int_helper(&arg, err_string);
   } else if (arg_match_helper(&arg, &g_av1_codec_arg_defs.tile_height, argv,
                               err_string)) {
     ctx->cfg.tile_height_count = arg_parse_list_helper(
@@ -4784,6 +4794,8 @@ static aom_codec_ctrl_fn_map_t encoder_ctrl_maps[] = {
   { AV1E_SET_MAX_PARTITION_SIZE, ctrl_set_max_partition_size },
   { AV1E_SET_ENABLE_DUAL_FILTER, ctrl_set_enable_dual_filter },
   { AV1E_SET_ENABLE_CHROMA_DELTAQ, ctrl_set_enable_chroma_deltaq },
+  { AV1E_SET_CHROMA_Q_OFFSET_U, ctrl_set_chroma_q_offset_u },
+  { AV1E_SET_CHROMA_Q_OFFSET_V, ctrl_set_chroma_q_offset_v },
   { AV1E_SET_ENABLE_INTRA_EDGE_FILTER, ctrl_set_enable_intra_edge_filter },
   { AV1E_SET_ENABLE_ORDER_HINT, ctrl_set_enable_order_hint },
   { AV1E_SET_ENABLE_TX64, ctrl_set_enable_tx64 },

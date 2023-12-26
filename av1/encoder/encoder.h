@@ -1138,7 +1138,7 @@ typedef struct AV1EncoderConfig {
 #endif
 
   int tpl_rd_mult;
-  
+
   int tpl_strength;
 
   int luma_bias_strength;
@@ -1151,11 +1151,6 @@ typedef struct AV1EncoderConfig {
 
   int frame_periodic_boost; // Fully implement frame periodic boost from VP9
 
-  // A flag to control if we enable the superblock qp sweep for a given lambda
-  int sb_qp_sweep;
-
-  // Selected global motion search method
-  GlobalMotionMethod global_motion_method;
   /*!\endcond */
 } AV1EncoderConfig;
 

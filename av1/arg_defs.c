@@ -789,9 +789,5 @@ const av1_codec_arg_definitions_t g_av1_codec_arg_defs = {
   .invert_luma_bias = ARG_DEF(NULL, "invert-luma-bias", 1,
                        "If inverted (1), raise rdmult in the opposite luminance direction (raises rdmult around and past the midpoint) "
                                   "Value range: (0)...1"),
-  .global_motion_method = ARG_DEF_ENUM(NULL, "global-motion-method", 1,
-                                       "Global motion search method "
-                                       "(default: disflow)",
-                                       global_motion_method_enum),
 #endif  // CONFIG_AV1_ENCODER
 };
