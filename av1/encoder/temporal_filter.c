@@ -1128,6 +1128,14 @@ static void tf_setup_filtering_buffer(AV1_COMP *cpi,
       cpi->sf.hl_sf.adjust_num_frames_for_arf_filtering;
   if (num_frames == 1) {  // `arnr_max_frames = 1` is used to disable filtering.
     adjust_num = 0;
+  } else if ((update_type != KF_UPDATE) &&
+             (cpi->oxcf.tune_cfg.content == AOM_CONTENT_PSY)) {
+    // If it's not a KF, still adjust the number of filtering frames by 1
+    adjust_num = 1;
+  } else if ((update_type == KF_UPDATE) &&
+             (cpi->oxcf.tune_cfg.content == AOM_CONTENT_PSY)) {
+    // If it is a KF, do not adjust it for maximum consistency
+    adjust_num = 0;
   } else if ((update_type == KF_UPDATE) && q <= 10) {
     adjust_num = 0;
   } else if (adjust_num_frames_for_arf_filtering > 0 &&

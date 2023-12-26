@@ -283,7 +283,9 @@ static int rd_pick_filter_intra_sby(const AV1_COMP *const cpi, MACROBLOCK *x,
     this_rd = RDCOST(x->rdmult, this_rate, tokenonly_rd_stats.dist);
 
     // Visual quality adjustment based on recon vs source variance.
-    if ((cpi->oxcf.mode == ALLINTRA) && (this_rd != INT64_MAX)) {
+    if ((cpi->oxcf.mode == ALLINTRA ||
+         cpi->oxcf.tune_cfg.content == AOM_CONTENT_PSY) &&
+        this_rd != INT64_MAX) {
       this_rd = (int64_t)(this_rd * intra_rd_variance_factor(cpi, x, bsize));
     }
 
@@ -1630,7 +1632,9 @@ int64_t av1_rd_pick_intra_sby_mode(const AV1_COMP *const cpi, MACROBLOCK *x,
     this_rd = RDCOST(x->rdmult, this_rate, this_distortion);
 
     // Visual quality adjustment based on recon vs source variance.
-    if ((cpi->oxcf.mode == ALLINTRA) && (this_rd != INT64_MAX)) {
+    if ((cpi->oxcf.mode == ALLINTRA ||
+         cpi->oxcf.tune_cfg.content == AOM_CONTENT_PSY) &&
+        this_rd != INT64_MAX) {
       this_rd = (int64_t)(this_rd * intra_rd_variance_factor(cpi, x, bsize));
     }
 

@@ -104,6 +104,17 @@ static uint64_t var_restoration_unit(const RestorationTileLimits *limits,
       limits->v_end - limits->v_start);
 }
 
+// When set to RESTORE_WIENER or RESTORE_SGRPROJ only those are allowed.
+// When set to RESTORE_TYPES we allow switchable.
+static inline RestorationType get_forced_restore_types(AV1EncoderConfig *oxcf) {
+  const TuneCfg *tune_params = &oxcf->tune_cfg;
+  if (tune_params->content == AOM_CONTENT_PSY) {
+    return RESTORE_SGRPROJ;
+  } else {
+    return RESTORE_TYPES;
+  }
+}
+
 typedef struct {
   const YV12_BUFFER_CONFIG *src;
   YV12_BUFFER_CONFIG *dst;
@@ -2122,6 +2133,8 @@ void av1_pick_filter_restoration(const YV12_BUFFER_CONFIG *src, AV1_COMP *cpi) {
                      RESTORATION_BORDER, RESTORATION_BORDER, highbd);
   }
 
+  const RestorationType force_restore_type =
+      get_forced_restore_types(&cpi->oxcf);
   double best_cost = DBL_MAX;
   int best_luma_unit_size = max_lr_unit_size;
   for (int luma_unit_size = max_lr_unit_size;
@@ -2146,6 +2159,11 @@ void av1_pick_filter_restoration(const YV12_BUFFER_CONFIG *src, AV1_COMP *cpi) {
         // Disable Loop restoration filter based on the flags set using speed
         // feature 'disable_wiener_filter' and 'disable_sgr_filter'.
         if (disable_lr_filter[r]) continue;
+
+        // If the restoration type is forced, ignore all other types
+        if ((force_restore_type != RESTORE_TYPES) && (r != RESTORE_NONE) &&
+            (r != force_restore_type))
+          continue;
 
         double cost_this_plane = RDCOST_DBL_WITH_NATIVE_BD_DIST(
             x->rdmult, rsc.total_bits[r] >> 4, rsc.total_sse[r],

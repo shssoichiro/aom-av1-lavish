@@ -632,8 +632,31 @@ static void setup_block_rdmult(const AV1_COMP *const cpi, MACROBLOCK *const x,
     av1_set_butteraugli_rdmult(cpi, x, bsize, mi_row, mi_col, &x->rdmult);
   }
 #endif
-  if (cpi->oxcf.mode == ALLINTRA) {
+  if (cpi->oxcf.mode == ALLINTRA ||
+      cpi->oxcf.tune_cfg.content == AOM_CONTENT_PSY) {
     x->rdmult = (int)(((int64_t)x->rdmult * x->intra_sb_rdmult_modifier) >> 7);
+  }
+
+  if (cpi->oxcf.tune_cfg.content == AOM_CONTENT_PSY) {
+    const int luma_bias_strength = 10;
+    const int luma_bias_midpoint = 40;
+    int avg_brightness;
+    BitDepthInfo bd_info = get_bit_depth_info(&x->e_mbd);
+    avg_brightness = av1_log_block_avg(cpi, x, bsize, mi_row, mi_col) >>
+                     (bd_info.bit_depth - 8);
+
+    double luma_adjustment = 0;
+    // Equivalent to luma_bias = 15, with user-changable strength = 10,
+    // midpoint = 40
+    luma_adjustment =
+        (1 - ((100. - 15.) / 100.)) /
+        (1 + exp(-(luma_bias_strength * (avg_brightness - luma_bias_midpoint)) /
+                 255.));
+    luma_adjustment += ((100. - 15.) / 100.);
+
+    // luma_adjustment = 1.0 - ((double) avg_brightness / (5100.0 / (double)
+    // cpi->oxcf.luma_bias)); Old method
+    x->rdmult = (int)((double)x->rdmult * luma_adjustment);
   }
 
   // Check to make sure that the adjustments above have not caused the
@@ -5523,7 +5546,8 @@ bool av1_rd_pick_partition(AV1_COMP *const cpi, ThreadData *td,
   // Set buffers and offsets.
   av1_set_offsets(cpi, tile_info, x, mi_row, mi_col, bsize);
 
-  if (cpi->oxcf.mode == ALLINTRA) {
+  if (cpi->oxcf.mode == ALLINTRA ||
+      cpi->oxcf.tune_cfg.content == AOM_CONTENT_PSY) {
     if (bsize == cm->seq_params->sb_size) {
       double var_min, var_max;
       log_sub_block_var(cpi, x, bsize, &var_min, &var_max);
