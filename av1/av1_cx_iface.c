@@ -212,6 +212,7 @@ struct av1_extracfg {
   int butteraugli_intensity_target;
   int butteraugli_hf_asymmetry;
   int butteraugli_rd_mult;
+  int butteraugli_quant_mult;
   int butteraugli_resize_factor;
   int loopfilter_sharpness;
   int enable_experimental_psy;
@@ -395,6 +396,7 @@ static const struct av1_extracfg default_extra_cfg = {
   100,             // butteraugli_intensity_target
   5,               // butteraugli_hf_asymmetry
   100,             // butteraugli_rd_mult
+  0,               // butteraugli_quant_mult
   1,               // butteraugli_resize_factor
   0,               // loopfilter_sharpness
   0,               // enable_experimental_psy
@@ -564,6 +566,7 @@ static const struct av1_extracfg default_extra_cfg = {
   100,             // butteraugli_intensity_target
   5,               // butteraugli_hf_asymmetry
   100,             // butteraugli_rd_mult
+  0,               // butteraugli_quant_mult
   1,               // butteraugli_resize_factor
   0,               // loopfilter_sharpness
   0,               // enable_experimental_psy
@@ -975,6 +978,7 @@ static aom_codec_err_t validate_config(aom_codec_alg_priv_t *ctx,
   RANGE_CHECK(extra_cfg, butteraugli_intensity_target, 0, 2000);
   RANGE_CHECK(extra_cfg, butteraugli_hf_asymmetry, 0, 100);
   RANGE_CHECK(extra_cfg, butteraugli_rd_mult, 1, 1000);
+  RANGE_CHECK(extra_cfg, butteraugli_quant_mult, 0, 1000);
   RANGE_CHECK(extra_cfg, butteraugli_resize_factor, 0, 2);
 #endif
 #if CONFIG_TUNE_VMAF
@@ -1601,6 +1605,8 @@ static void set_encoder_config(AV1EncoderConfig *oxcf,
   oxcf->butteraugli_hf_asymmetry = extra_cfg->butteraugli_hf_asymmetry;
 
   oxcf->butteraugli_rd_mult = extra_cfg->butteraugli_rd_mult;
+
+  oxcf->butteraugli_quant_mult = extra_cfg->butteraugli_quant_mult;
 
   oxcf->butteraugli_resize_factor = extra_cfg->butteraugli_resize_factor;
 #endif
@@ -4363,6 +4369,9 @@ static aom_codec_err_t encoder_set_option(aom_codec_alg_priv_t *ctx,
   } else if (arg_match_helper(&arg, &g_av1_codec_arg_defs.butteraugli_rd_mult,
                               argv, err_string)) {
     extra_cfg.butteraugli_rd_mult = arg_parse_int_helper(&arg, err_string);
+  } else if (arg_match_helper(&arg, &g_av1_codec_arg_defs.butteraugli_quant_mult,
+                              argv, err_string)) {
+    extra_cfg.butteraugli_quant_mult = arg_parse_int_helper(&arg, err_string);
   } else if (arg_match_helper(&arg, &g_av1_codec_arg_defs.butteraugli_resize_factor,
                               argv, err_string)) {
     extra_cfg.butteraugli_resize_factor = arg_parse_int_helper(&arg, err_string);
@@ -4524,6 +4533,13 @@ static aom_codec_err_t ctrl_set_butteraugli_rd_mult(aom_codec_alg_priv_t *ctx,
                                           va_list args) {
   struct av1_extracfg extra_cfg = ctx->extra_cfg;
   extra_cfg.butteraugli_rd_mult = CAST(AOME_SET_BUTTERAUGLI_RD_MULT, args);
+  return update_extra_cfg(ctx, &extra_cfg);
+}
+
+static aom_codec_err_t ctrl_set_butteraugli_quant_mult(aom_codec_alg_priv_t *ctx,
+                                          va_list args) {
+  struct av1_extracfg extra_cfg = ctx->extra_cfg;
+  extra_cfg.butteraugli_quant_mult = CAST(AOME_SET_BUTTERAUGLI_QUANT_MULT, args);
   return update_extra_cfg(ctx, &extra_cfg);
 }
 
@@ -4744,6 +4760,7 @@ static aom_codec_ctrl_fn_map_t encoder_ctrl_maps[] = {
   { AOME_SET_BUTTERAUGLI_INTENSITY_TARGET, ctrl_set_butteraugli_intensity_target },
   { AOME_SET_BUTTERAUGLI_HF_ASYMMETRY, ctrl_set_butteraugli_hf_asymmetry },
   { AOME_SET_BUTTERAUGLI_RD_MULT, ctrl_set_butteraugli_rd_mult },
+  { AOME_SET_BUTTERAUGLI_QUANT_MULT, ctrl_set_butteraugli_quant_mult },
   { AOME_SET_BUTTERAUGLI_RESIZE_FACTOR, ctrl_set_butteraugli_resize_factor },
   { AOME_SET_LOOPFILTER_SHARPNESS, ctrl_set_loopfilter_sharpness },
   { AOME_SET_ENABLE_EXPERIMENTAL_PSY, ctrl_set_enable_experimental_psy },

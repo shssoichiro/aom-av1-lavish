@@ -4194,6 +4194,11 @@ void av1_twopass_postencode_update(AV1_COMP *cpi) {
     int i;
     for (i = pyramid_level; i <= MAX_ARF_LAYERS; ++i) {
       p_rc->active_best_quality[i] = cpi->common.quant_params.base_qindex;
+#if CONFIG_TUNE_BUTTERAUGLI
+      if (cpi->butteraugli_info.original_qindex != -1) {
+        p_rc->active_best_quality[i] = cpi->butteraugli_info.original_qindex;
+      }
+#endif
 #if CONFIG_TUNE_VMAF
       if (cpi->vmaf_info.original_qindex != -1 &&
           ((cpi->oxcf.tune_cfg.tuning >= AOM_TUNE_VMAF_WITH_PREPROCESSING &&

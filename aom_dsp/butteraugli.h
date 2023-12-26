@@ -13,9 +13,13 @@
 #define AOM_AOM_DSP_BUTTERAUGLI_H_
 
 #include "aom_scale/yv12config.h"
+#include <jxl/butteraugli.h>
+#include <jxl/thread_parallel_runner.h>
+
+struct AV1_COMP;
 
 // Returns a boolean that indicates success/failure.
-int aom_calc_butteraugli(const YV12_BUFFER_CONFIG *source,
+int aom_calc_butteraugli(struct AV1_COMP *cpi, const YV12_BUFFER_CONFIG *source,
                          const YV12_BUFFER_CONFIG *distorted, int bit_depth,
                          aom_matrix_coefficients_t matrix_coefficients,
                          aom_color_range_t color_range, float *dist_map, int target_intensity, int hf_asymmetry);
