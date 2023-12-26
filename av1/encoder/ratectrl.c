@@ -1173,8 +1173,15 @@ static int calc_active_best_quality_no_stats_cbr(const AV1_COMP *cpi,
       double q_val;
       active_best_quality = get_kf_active_quality(
           p_rc, p_rc->avg_frame_qindex[KEY_FRAME], bit_depth);
-      // Allow somewhat lower kf minq with small image formats.
-      if ((width * height) <= (352 * 288)) {
+      // Allow lower kf minq.
+      if (cpi->oxcf.rc_cfg.mode == AOM_Q) {
+        // This change mostly improves SSIM score. PSNR change is small.
+        // Both constant q mode and VBR mode show similar results.
+        // Since it makes the key frame size larger, we only allow it in
+        // constant q mode for now.
+        // TODO(any): test if this change could work for one pass CBR and VBR.
+        q_adj_factor -= 0.3;
+      } else if ((width * height) <= (352 * 288)) {
         q_adj_factor -= 0.25;
       }
       // Convert the adjustment factor to a qindex delta
@@ -1411,10 +1418,16 @@ static int rc_pick_q_and_bounds_no_stats(const AV1_COMP *cpi, int width,
       active_best_quality = get_kf_active_quality(
           p_rc, p_rc->avg_frame_qindex[KEY_FRAME], bit_depth);
 
-      // Allow somewhat lower kf minq with small image formats.
-      if ((width * height) <= (352 * 288)) {
-        q_adj_factor -= 0.25;
+      // Allow lower kf minq.
+      if (cpi->oxcf.rc_cfg.mode == AOM_Q) {
+        // This change mostly improves SSIM score. PSNR change is small.
+        // Both constant q mode and VBR mode show similar results.
+        // Since it makes the key frame size larger, we only allow it in
+        // constant q mode for now.
+        // TODO(any): test if this change could work for one pass CBR and VBR.
+        q_adj_factor -= 0.3;
       }
+      elseif((width * height) <= (352 * 288)) { q_adj_factor -= 0.25; }
 
       // Convert the adjustment factor to a qindex delta on active_best_quality.
       {
@@ -1642,8 +1655,15 @@ static void get_intra_q_and_bounds(const AV1_COMP *cpi, int width, int height,
       active_best_quality /= 3;
     }
 
-    // Allow somewhat lower kf minq with small image formats.
-    if ((width * height) <= (352 * 288)) {
+    // Allow lower kf minq.
+    if (cpi->oxcf.rc_cfg.mode == AOM_Q) {
+      // This change mostly improves SSIM score. PSNR change is small.
+      // Both constant q mode and VBR mode show similar results.
+      // Since it makes the key frame size larger, we only allow it in
+      // constant q mode for now.
+      // TODO(any): test if this change could work for one pass CBR and VBR.
+      q_adj_factor -= 0.3;
+    } else if ((width * height) <= (352 * 288)) {
       q_adj_factor -= 0.25;
     }
 
